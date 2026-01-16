@@ -1,0 +1,13 @@
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <!-- Include all changesets in order -->
+    <include file="db/liquibase/1-create-database.sql"/>
+    <include file="db/liquibase/2-create-table-client.sql"/>
+    <include file="db/liquibase/3-create-table-offre.sql"/>
+    <include file="db/liquibase/4-create-table-contrat.sql"/>
+    <include file="db/liquibase/5-create-table-demande-client.sql"/>
+</databaseChangeLog>
