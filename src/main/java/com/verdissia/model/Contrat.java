@@ -38,8 +38,8 @@ public class Contrat {
     private Offre typeOffre;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "energie", nullable = false, length = 20)
-    private Energie energie;
+    @Column(name = "type_energie", nullable = false, length = 20)
+    private Energie typeEnergie;
 
     @Column(name = "type_offre", length = 100)
     private String typeOffreLibelle;
@@ -55,9 +55,6 @@ public class Contrat {
 
     @Column(name = "prix", precision = 10, scale = 6)
     private BigDecimal prix;
-
-    @Column(name = "prix_abonnement", precision = 10, scale = 2)
-    private BigDecimal prixAbonnement;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 50)

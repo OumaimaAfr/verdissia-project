@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Data
 @Builder
@@ -16,8 +17,8 @@ public class OffreResponse {
     private Integer id;
     private String libelle;
     private String description;
-    private String energie;
-    private BigDecimal prixBase;
-    private BigDecimal prixAbonnementMensuel;
-    private Boolean offreVerte;
+    private String typeEnergie;
+    private String preferenceOffre;
+    private BigDecimal prix;
+    private LocalDateTime dateMiseEnService;
 }
