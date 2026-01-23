@@ -30,16 +30,13 @@ public class Client {
     private String telephone;
 
     @Column(length = 500)
-    private String adresse;
+    private String voie;
 
     @Column(name = "code_postal", length = 10)
     private String codePostal;
 
     @Column(length = 100)
     private String ville;
-
-    @Column(length = 100)
-    private String pays;
 
     @OneToMany(mappedBy = "client", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<DemandeClient> demandes = new ArrayList<>();

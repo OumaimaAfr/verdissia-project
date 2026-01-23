@@ -15,12 +15,11 @@ public class ContratRequest {
     private Long clientId;
     private String demandeId;
     private Integer offreId;
-    private String energie;
+    private String typeEnergie;
     private String adresseLivraison;
     private String codePostalLivraison;
     private String villeLivraison;
     private BigDecimal prix;
-    private BigDecimal prixAbonnement;
     private String modePaiement;
     private String iban;
 }

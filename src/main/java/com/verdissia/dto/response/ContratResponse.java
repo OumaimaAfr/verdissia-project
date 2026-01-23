@@ -21,12 +21,12 @@ public class ContratResponse {
     private String clientTelephone;
     private String demandeId;
     private Integer offreId;
-    private String energie;
+    private String typeEnergie;
     private String offre;
     private String adresseLivraison;
     private String codePostalLivraison;
     private String villeLivraison;
-    private BigDecimal prixAbonnement;
+    private BigDecimal prix;
     private String statut;
     private String modePaiement;
     private String iban;

@@ -14,8 +14,7 @@ public class ClientRequest {
     private String prenom;
     private String email;
     private String telephone;
-    private String adresse;
+    private String voie;
     private String codePostal;
     private String ville;
-    private String pays;
 }

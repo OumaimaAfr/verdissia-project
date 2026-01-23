@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "offre")
@@ -28,17 +29,17 @@ public class Offre {
     private String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "energie", nullable = false, length = 20)
-    private TypeEnergie energie;
+    @Column(name = "type_energie", nullable = false, length = 20)
+    private TypeEnergie typeEnergie;
 
-    @Column(name = "prix_base", precision = 10, scale = 6)
-    private BigDecimal prixBase;
+    @Column(nullable = false, length = 20)
+    private String preferenceOffre;
 
-    @Column(name = "prix_abonnement_mensuel", precision = 10, scale = 2)
-    private BigDecimal prixAbonnementMensuel;
+    @Column(name = "prix", precision = 10, scale = 6)
+    private BigDecimal prix;
 
-    @Column(name = "offre_verte")
-    private Boolean offreVerte = false;
+    @Column(name = "date_mise_service")
+    private LocalDateTime dateMiseEnService;
 
     public enum TypeEnergie {
         GAZ, ELECTRICITE, DUAL
