@@ -3,7 +3,6 @@ package com.verdissia.util;
 import com.verdissia.constants.ApplicationConstants;
 import com.verdissia.dto.response.IResponseDTO;
 import com.verdissia.dto.response.ResponseDTO;
-import com.verdissia.util.ResponseHelper;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
