@@ -9,6 +9,7 @@ import java.util.List;
 @Table(name = "client")
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class Client {
@@ -22,6 +23,12 @@ public class Client {
 
     @Column(nullable = false, length = 100)
     private String prenom;
+
+    @Column(nullable = false, length = 100)
+    private String civilite;
+
+    @Column(name = "reference_client", nullable = false, length = 100)
+    private String referenceClient;
 
     @Column(nullable = false, unique = true, length = 255)
     private String email;

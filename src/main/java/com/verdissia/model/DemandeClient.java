@@ -47,6 +47,13 @@ public class DemandeClient {
     @OneToOne(mappedBy = "demande", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private Contrat contrat;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "offre_id", nullable = false)
+    private Offre offre;
+
+    @Column(name = "consentement_client", nullable = false)
+    private Boolean consentementClient;
+
     public enum StatutDemande {
         EN_ATTENTE, EN_COURS, VALIDEE, REJETEE, ANNULEE, EN_ERREUR
     }
