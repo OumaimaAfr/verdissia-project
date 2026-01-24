@@ -15,6 +15,8 @@ public class ClientResponse {
     private Long id;
     private String nom;
     private String prenom;
+    private String civilite;
+    private String referenceClient;
     private String email;
     private String telephone;
     private String voie;
