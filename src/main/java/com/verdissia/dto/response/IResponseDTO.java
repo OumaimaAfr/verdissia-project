@@ -1,7 +1,8 @@
 package com.verdissia.dto.response;
 
-import io.swagger.v3.oas.annotations.Hidden;
-
-@Hidden
-public interface IResponseDTO {
+public interface IResponseDTO<T> {
+    String getStatus();
+    T getData();
+    ResponseDTO.CodeMessage getError();
+    ResponseDTO.CodeMessage getInfo();
 }

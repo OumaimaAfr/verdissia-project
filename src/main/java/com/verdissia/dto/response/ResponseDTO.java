@@ -1,6 +1,6 @@
 package com.verdissia.dto.response;
 
-public class ResponseDTO<T> implements IResponseDTO {
+public class ResponseDTO<T> implements IResponseDTO<T> {
 
     private String status;
 

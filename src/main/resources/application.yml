@@ -1,9 +1,10 @@
 server:
   port: 8081
 
-spring:
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: http://localhost:8080/realms/energy-contracts
+jwt:
+  secret: "verdissia-hackathon-jwt-secret-32chars-min-2026"
+  ttlMinutes: 120
+
+users:
+  client-pwd: "Cl13nt!Pwd_2026#Verd"
+  bo-pwd: "B0!Pwd_2026#Verd!ss1a"
