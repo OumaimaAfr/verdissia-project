@@ -51,7 +51,18 @@ public class DemandeClientController {
 
     @GetMapping("/{id}")
     public ResponseEntity<DemandeResponse> getDemandeById(@PathVariable String id) {
-        // TODO: Implement getDemandeById in service
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        try {
+            DemandeResponse response = demandeClientService.getDemandeById(id);
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Erreur lors de la récupération de la demande {}: {}", id, e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(DemandeResponse.builder()
+                            .motifRejet(e.getMessage())
+                            .build());
+        } catch (Exception e) {
+            log.error("Erreur inattendue lors de la récupération de la demande {}: {}", id, e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 }

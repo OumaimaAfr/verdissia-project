@@ -2,9 +2,6 @@ package com.verdissia.service;
 
 import com.verdissia.dto.request.DemandeClientRequest;
 import com.verdissia.dto.response.DemandeResponse;
-import com.verdissia.llm.LlmMapper;
-import com.verdissia.llm.demande.LlmDecisionEngine;
-import com.verdissia.llm.service.LLMValidationService;
 import com.verdissia.mapper.DemandeMapper;
 import com.verdissia.model.Client;
 import com.verdissia.model.DemandeClient;
@@ -18,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -33,13 +29,7 @@ public class DemandeClientService {
     private final DemandeClientRepository demandeClientRepository;
     private final ClientRepository clientRepository;
     private final OffreRepository offreRepository;
-    private final LLMValidationService llmValidationService;
-    private final LlmDecisionEngine llmDecisionEngine;
-    private final LlmMapper llmMapper;
-    private final ObjectMapper objectMapper;
-
-    private final DemandeMapper demandeMapper; // Continue d'ici
-
+    private final DemandeMapper demandeMapper;
     private final EmailService emailService;
     private final TokenService tokenService;
 
@@ -49,7 +39,8 @@ public class DemandeClientService {
     @Value("${spring.mail.password}")
     private String mailPassword;
 
-    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter DATE_FORMATTER_YMD = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter DATE_FORMATTER_DMY = DateTimeFormatter.ofPattern("dd-MM-yyyy");
 
     public DemandeResponse getDemandeById(String id) {
         log.info("Fetching demande with id: {}", id);
@@ -114,7 +105,15 @@ public class DemandeClientService {
             LocalDateTime dateMiseEnService = null;
             if (request.getInformationsFourniture().getDateMiseEnService() != null &&
                     !request.getInformationsFourniture().getDateMiseEnService().isEmpty()) {
-                dateMiseEnService = java.time.LocalDate.parse(request.getInformationsFourniture().getDateMiseEnService(), DATE_FORMATTER).atStartOfDay();
+                try {
+                    dateMiseEnService = java.time.LocalDate.parse(request.getInformationsFourniture().getDateMiseEnService(), DATE_FORMATTER_YMD).atStartOfDay();
+                } catch (Exception e1) {
+                    try {
+                        dateMiseEnService = java.time.LocalDate.parse(request.getInformationsFourniture().getDateMiseEnService(), DATE_FORMATTER_DMY).atStartOfDay();
+                    } catch (Exception e2) {
+                        throw new RuntimeException("Format de date invalide. Formats acceptés: yyyy-MM-dd ou dd-MM-yyyy. Date reçue: " + request.getInformationsFourniture().getDateMiseEnService());
+                    }
+                }
             }
 
             // Create demande with EN_ATTENTE_SIGNATURE status
