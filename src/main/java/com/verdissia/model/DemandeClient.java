@@ -1,10 +1,12 @@
 package com.verdissia.model;
 
+import com.verdissia.dto.request.DemandeClientRequest;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UuidGenerator;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -56,5 +58,25 @@ public class DemandeClient {
 
     public enum StatutDemande {
         EN_ATTENTE, EN_COURS, VALIDEE, REJETEE, ANNULEE, EN_ERREUR
+    }
+
+    public static DemandeClient fromRequest(DemandeClientRequest request, Client client, Offre offre) {
+        DemandeClient d = new DemandeClient();
+        d.typeDemande = request.getTypeDemande();
+        d.client = client;
+        d.offre = offre;
+        d.consentementClient = request.getConsentementClient();
+
+        // Statut initial
+        d.statut = StatutDemande.EN_ATTENTE;
+
+        d.dateCreation = LocalDateTime.from(Instant.now());
+        d.dateTraitement = null;
+
+        d.motifRejet = null;
+        d.contrat = null;
+
+        return d;
+
     }
 }

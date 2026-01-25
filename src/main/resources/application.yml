@@ -8,3 +8,12 @@ jwt:
 users:
   client-pwd: "Cl13nt!Pwd_2026#Verd"
   bo-pwd: "B0!Pwd_2026#Verd!ss1a"
+
+llm:
+  base-url: https://api.mistral.ai
+  model: mistral-small-latest
+  api-key: tWZkgUi6tVKU78YKMa2wN5zMacTgEAXE
+  timeout-seconds: 20
+  mock-mode: true
+  threshold-auto-approve: 0.85
+  threshold-auto-reject: 0.60
