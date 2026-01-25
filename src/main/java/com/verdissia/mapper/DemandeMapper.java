@@ -17,7 +17,6 @@ public class DemandeMapper {
                 .typeDemande(demande.getTypeDemande())
                 .statut(demande.getStatut() != null ? demande.getStatut().name() : null)
                 .motifRejet(demande.getMotifRejet())
-                .contratId(demande.getContrat() != null ? demande.getContrat().getId() : null)
                 .offreId(demande.getOffre() != null ? demande.getOffre().getId() : null)
                 .offreLibelle(demande.getOffre() != null ? demande.getOffre().getLibelle() : null)
                 .consentementClient(demande.getConsentementClient())

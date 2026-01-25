@@ -22,30 +22,33 @@ public class Contrat {
     @Column(name = "numero_contrat", nullable = false, unique = true, length = 50)
     private String numeroContrat;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "client_id", nullable = false,
-            foreignKey = @ForeignKey(name = "fk_contrat_client"))
-    private Client client;
+    @Column(name = "reference_client", nullable = false, length = 100)
+    private String referenceClient;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "demande_id",
-            foreignKey = @ForeignKey(name = "fk_contrat_demande"))
-    private DemandeClient demande;
+    @Column(nullable = false, length = 100)
+    private String civilite;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "offre_id",
-            foreignKey = @ForeignKey(name = "fk_contrat_offre"))
-    private Offre typeOffre;
+    @Column(nullable = false, length = 100)
+    private String nom;
+
+    @Column(nullable = false, length = 100)
+    private String prenom;
+
+    @Column(nullable = false, unique = true, length = 255)
+    private String email;
+
+    @Column(length = 20)
+    private String telephone;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "type_energie", nullable = false, length = 20)
     private Energie typeEnergie;
 
-    @Column(name = "type_offre", length = 100)
-    private String typeOffreLibelle;
+    @Column(name = "libelle_offre", nullable = false, length = 200)
+    private String libelleOffre;
 
-    @Column(name = "adresse_livraison", nullable = false, length = 500)
-    private String adresseLivraison;
+    @Column(name = "voie_livraison", nullable = false, length = 500)
+    private String voieLivraison;
 
     @Column(name = "code_postal_livraison", nullable = false, length = 10)
     private String codePostalLivraison;
@@ -56,10 +59,6 @@ public class Contrat {
     @Column(name = "prix", precision = 10, scale = 6)
     private BigDecimal prix;
 
-    @Enumerated(EnumType.STRING)
-    @Column(length = 50)
-    private StatutContrat statut = StatutContrat.BROUILLON;
-
     @CreationTimestamp
     @Column(name = "date_creation", nullable = false, updatable = false)
     private LocalDateTime dateCreation;
@@ -67,25 +66,16 @@ public class Contrat {
     @Column(name = "date_signature")
     private LocalDateTime dateSignature;
 
-    @Column(name = "date_activation")
-    private LocalDateTime dateActivation;
+    @Column(name = "paiement_traite", length = 20)
+    private Boolean paiementTraite;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "mode_paiement", length = 20)
-    private ModePaiement modePaiement;
+    @Column(name = "date_mise_service")
+    private LocalDateTime dateMiseEnService;
 
-    @Column(length = 34)
-    private String iban;
+    @Column(name = "consentement_client", nullable = false)
+    private Boolean consentementClient;
 
     public enum Energie {
         GAZ, ELECTRICITE, DUAL
-    }
-
-    public enum StatutContrat {
-        BROUILLON, EN_SIGNATURE, ACTIF, RESILIE, SUSPENDU, EXPIRE
-    }
-
-    public enum ModePaiement {
-        PRELEVEMENT, VIREMENT, CARTE, CHEQUE
     }
 }
