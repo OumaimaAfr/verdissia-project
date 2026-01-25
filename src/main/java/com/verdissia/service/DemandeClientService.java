@@ -20,6 +20,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -43,6 +44,45 @@ public class DemandeClientService {
         log.info("Creating demande for client: {}", request.getInformationsPersonnelles().getEmail());
         
         try {
+            // Check if client already has a pending demande
+            String referenceClient = request.getInformationsPersonnelles().getReferenceClient();
+            List<DemandeClient> allClientDemandes = demandeClientRepository.findByReferenceClient(referenceClient);
+            
+            // Filter for pending statuses in Java
+            boolean hasPendingDemande = allClientDemandes.stream()
+                    .anyMatch(d -> d.getStatut() == DemandeClient.StatutDemande.EN_ATTENTE ||
+                                  d.getStatut() == DemandeClient.StatutDemande.EN_ATTENTE_SIGNATURE ||
+                                  d.getStatut() == DemandeClient.StatutDemande.EN_COURS);
+            
+            if (hasPendingDemande) {
+                log.warn("Client {} already has a pending demande", referenceClient);
+                throw new RuntimeException("Vous avez déjà une demande en cours de traitement");
+            }
+            
+            // Validate required fields
+            ValidationResult validation = validateRequiredFields(request);
+            
+            if (validation.isValid()) {
+                // All fields present - save directly with EN_ATTENTE_SIGNATURE status
+                return processCompleteDemande(request);
+            } else {
+                // Missing fields - technical error
+                return processIncompleteDemande(request, validation.getErrors());
+            }
+            
+        } catch (RuntimeException e) {
+            // Re-throw business exceptions (like pending demande)
+            throw e;
+        } catch (Exception e) {
+            log.error("Error creating demande for client: {}", request.getInformationsPersonnelles().getEmail(), e);
+            throw new RuntimeException("Failed to create demande: " + e.getMessage(), e);
+        }
+    }
+    
+    private DemandeResponse processCompleteDemande(DemandeClientRequest request) {
+        log.info("Processing complete demande for client: {}", request.getInformationsPersonnelles().getEmail());
+        
+        try {
             // Find or create client
             Client client = findOrCreateClient(request.getInformationsPersonnelles(), request.getInformationsFourniture());
             
@@ -50,88 +90,143 @@ public class DemandeClientService {
             Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
                     .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
 
-            // Create demande with EN_ATTENTE status
+            // Create demande with EN_ATTENTE_SIGNATURE status
             DemandeClient demande = DemandeClient.builder()
                     .typeDemande(request.getTypeDemande())
+                    .referenceClient(request.getInformationsPersonnelles().getReferenceClient())
                     .client(client)
                     .offre(offre)
                     .consentementClient(request.getConsentementClient())
-                    .statut(DemandeClient.StatutDemande.EN_ATTENTE)
+                    .statut(DemandeClient.StatutDemande.EN_ATTENTE_SIGNATURE)
                     .build();
             
             DemandeClient savedDemande = demandeClientRepository.save(demande);
-            log.info("Demande created successfully with id: {} and status EN_ATTENTE", savedDemande.getId());
+            log.info("Demande created successfully with id: {} and status EN_ATTENTE_SIGNATURE", savedDemande.getId());
             
-            // Process LLM validation
-            return processLLMValidation(savedDemande, request, offre);
+            return demandeMapper.toResponse(savedDemande);
             
         } catch (Exception e) {
-            log.error("Error creating demande for client: {}", request.getInformationsPersonnelles().getEmail(), e);
-            throw new RuntimeException("Failed to create demande: " + e.getMessage(), e);
+            log.error("Error processing complete demande", e);
+            throw new RuntimeException("Failed to process complete demande: " + e.getMessage(), e);
         }
     }
     
-    private DemandeResponse processLLMValidation(DemandeClient demande, DemandeClientRequest request, Offre offre) {
-        log.info("Starting LLM validation for demande: {}", demande.getId());
+    private DemandeResponse processIncompleteDemande(DemandeClientRequest request, String errors) {
+        log.info("Processing incomplete demande for client: {} with errors: {}", 
+                request.getInformationsPersonnelles().getEmail(), errors);
         
         try {
-            // Update status to EN_COURS during LLM processing
-            demande.setStatut(DemandeClient.StatutDemande.EN_COURS);
-            demandeClientRepository.save(demande);
-            log.info("Demande {} status updated to EN_COURS", demande.getId());
+            // Find or create client
+            Client client = findOrCreateClient(request.getInformationsPersonnelles(), request.getInformationsFourniture());
             
-            // Convert request to LLM input format
-            var llmInput = llmMapper.toInput(request, offre);
+            // Find offre
+            Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
+                    .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
+
+            // Create demande with EN_ERREUR status
+            DemandeClient demande = DemandeClient.builder()
+                    .typeDemande(request.getTypeDemande())
+                    .referenceClient(request.getInformationsPersonnelles().getReferenceClient())
+                    .client(client)
+                    .offre(offre)
+                    .consentementClient(request.getConsentementClient())
+                    .statut(DemandeClient.StatutDemande.EN_ERREUR)
+                    .motifRejet("Erreur technique: champs obligatoires manquants - " + errors)
+                    .dateTraitement(LocalDateTime.now())
+                    .build();
             
-            // Validate with LLM service
-            var validationResult = llmValidationService.validate(llmInput);
-            log.info("LLM validation completed for demande: {} with confidence: {}", demande.getId(), validationResult.confidence());
+            DemandeClient savedDemande = demandeClientRepository.save(demande);
+            log.info("Demande created with error status for client: {} - {}", 
+                    savedDemande.getId(), savedDemande.getMotifRejet());
             
-            // Apply decision based on threshold
-            var decisionResult = llmDecisionEngine.decide(validationResult);
-            
-            // Update demande with final decision
-            switch (decisionResult) {
-                case "OK" -> {
-                    demande.setStatut(DemandeClient.StatutDemande.VALIDEE);
-                    demande.setMotifRejet(null);
-                }
-                case "KO" -> {
-                    demande.setStatut(DemandeClient.StatutDemande.REJETEE);
-                    // Build rejection reason from validation errors
-                    String motifRejet = buildMotifRejet(validationResult);
-                    demande.setMotifRejet(motifRejet);
-                }
-                case "REVIEW" -> {
-                    demande.setStatut(DemandeClient.StatutDemande.EN_COURS);
-                    demande.setMotifRejet("Demande nécessite une révision manuelle");
-                }
-                default -> {
-                    demande.setStatut(DemandeClient.StatutDemande.EN_ERREUR);
-                    demande.setMotifRejet("Décision inconnue: " + decisionResult);
-                }
-            }
-            
-            demande.setDateTraitement(LocalDateTime.now());
-            DemandeClient updatedDemande = demandeClientRepository.save(demande);
-            log.info("Demande {} processed with final status: {}", updatedDemande.getId(), updatedDemande.getStatut());
-            
-            return demandeMapper.toResponse(updatedDemande);
+            return demandeMapper.toResponse(savedDemande);
             
         } catch (Exception e) {
-            log.error("LLM processing failed for demande: {}", demande.getId(), e);
-            
-            // Update status to EN_ERREUR on technical failure
-            try {
-                demande.setStatut(DemandeClient.StatutDemande.EN_ERREUR);
-                demande.setDateTraitement(LocalDateTime.now());
-                demande.setMotifRejet("Erreur technique lors du traitement: " + e.getMessage());
-                demandeClientRepository.save(demande);
-            } catch (Exception saveException) {
-                log.error("Failed to update error status for demande: {}", demande.getId(), saveException);
+            log.error("Error processing incomplete demande", e);
+            throw new RuntimeException("Failed to process incomplete demande: " + e.getMessage(), e);
+        }
+    }
+    
+    private ValidationResult validateRequiredFields(DemandeClientRequest request) {
+        StringBuilder errors = new StringBuilder();
+        
+        // Validate informations personnelles
+        if (request.getInformationsPersonnelles() == null) {
+            errors.append("Informations personnelles manquantes; ");
+        } else {
+            var infos = request.getInformationsPersonnelles();
+            if (infos.getReferenceClient() == null || infos.getReferenceClient().trim().isEmpty()) {
+                errors.append("Référence client manquante; ");
             }
-            
-            throw new RuntimeException("LLM processing failed: " + e.getMessage(), e);
+            if (infos.getCivilite() == null || infos.getCivilite().trim().isEmpty()) {
+                errors.append("Civilité manquante; ");
+            }
+            if (infos.getPrenom() == null || infos.getPrenom().trim().isEmpty()) {
+                errors.append("Prénom manquant; ");
+            }
+            if (infos.getNom() == null || infos.getNom().trim().isEmpty()) {
+                errors.append("Nom manquant; ");
+            }
+            if (infos.getEmail() == null || infos.getEmail().trim().isEmpty()) {
+                errors.append("Email manquant; ");
+            }
+            if (infos.getTelephone() == null || infos.getTelephone().trim().isEmpty()) {
+                errors.append("Téléphone manquant; ");
+            }
+        }
+        
+        // Validate informations fourniture
+        if (request.getInformationsFourniture() == null) {
+            errors.append("Informations de fourniture manquantes; ");
+        } else {
+            var fourniture = request.getInformationsFourniture();
+            if (fourniture.getVoie() == null || fourniture.getVoie().trim().isEmpty()) {
+                errors.append("Voie manquante; ");
+            }
+            if (fourniture.getCodePostal() == null || fourniture.getCodePostal().trim().isEmpty()) {
+                errors.append("Code postal manquant; ");
+            }
+            if (fourniture.getVille() == null || fourniture.getVille().trim().isEmpty()) {
+                errors.append("Ville manquante; ");
+            }
+            if (fourniture.getTypeEnergie() == null || fourniture.getTypeEnergie().trim().isEmpty()) {
+                errors.append("Type d'énergie manquant; ");
+            }
+            if (fourniture.getDateMiseEnService() == null || fourniture.getDateMiseEnService().trim().isEmpty()) {
+                errors.append("Date de mise en service manquante; ");
+            }
+            if (fourniture.getOffre() == null) {
+                errors.append("Offre manquante; ");
+            }
+        }
+        
+        // Validate other required fields
+        if (request.getTypeDemande() == null || request.getTypeDemande().trim().isEmpty()) {
+            errors.append("Type de demande manquant; ");
+        }
+        if (request.getConsentementClient() == null) {
+            errors.append("Consentement client manquant; ");
+        }
+        
+        boolean isValid = errors.length() == 0;
+        return new ValidationResult(isValid, isValid ? "" : errors.toString());
+    }
+    
+    private static class ValidationResult {
+        private final boolean valid;
+        private final String errors;
+        
+        public ValidationResult(boolean valid, String errors) {
+            this.valid = valid;
+            this.errors = errors;
+        }
+        
+        public boolean isValid() {
+            return valid;
+        }
+        
+        public String getErrors() {
+            return errors;
         }
     }
     
@@ -154,21 +249,5 @@ public class DemandeClientService {
                 .build();
         
         return clientRepository.save(client);
-    }
-    
-    private String buildMotifRejet(com.verdissia.llm.dto.LLMDemandeResult validationResult) {
-        if (validationResult.errors() != null && !validationResult.errors().isEmpty()) {
-            StringBuilder motif = new StringBuilder("Erreurs de validation: ");
-            validationResult.errors().forEach(error -> 
-                motif.append(error.field()).append(" - ").append(error.message()).append("; ")
-            );
-            return motif.toString();
-        }
-        
-        if (validationResult.notes() != null && !validationResult.notes().trim().isEmpty()) {
-            return "Rejet: " + validationResult.notes();
-        }
-        
-        return "Demande rejetée suite à validation LLM";
     }
 }

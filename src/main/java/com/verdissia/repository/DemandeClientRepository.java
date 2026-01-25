@@ -15,9 +15,9 @@ public interface DemandeClientRepository extends JpaRepository<DemandeClient, St
     
     List<DemandeClient> findByStatut(DemandeClient.StatutDemande statut);
     
-    @Query("SELECT d FROM DemandeClient d WHERE d.client.email = :email")
-    List<DemandeClient> findByClientEmail(@Param("email") String email);
+    List<DemandeClient> findByClientEmail(String email);
     
-    @Query("SELECT d FROM DemandeClient d WHERE d.offre.id = :offreId")
-    List<DemandeClient> findByOffreId(@Param("offreId") Integer offreId);
+    List<DemandeClient> findByOffreId(Integer offreId);
+
+    List<DemandeClient> findByReferenceClient(String referenceClient);
 }

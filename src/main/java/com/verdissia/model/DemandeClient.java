@@ -23,6 +23,9 @@ public class DemandeClient {
     @Column(length = 36)
     private String id;
 
+    @Column(name = "reference_client", nullable = false, length = 50)
+    private String referenceClient;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "client_id", nullable = false,
             foreignKey = @ForeignKey(name = "fk_demande_client"))
@@ -57,12 +60,13 @@ public class DemandeClient {
     private Boolean consentementClient;
 
     public enum StatutDemande {
-        EN_ATTENTE, EN_COURS, VALIDEE, REJETEE, ANNULEE, EN_ERREUR
+        EN_ATTENTE, EN_ATTENTE_SIGNATURE, EN_COURS, VALIDEE, REJETEE, ANNULEE, EN_ERREUR
     }
 
     public static DemandeClient fromRequest(DemandeClientRequest request, Client client, Offre offre) {
         DemandeClient d = new DemandeClient();
         d.typeDemande = request.getTypeDemande();
+        d.referenceClient = request.getInformationsPersonnelles().getReferenceClient();
         d.client = client;
         d.offre = offre;
         d.consentementClient = request.getConsentementClient();

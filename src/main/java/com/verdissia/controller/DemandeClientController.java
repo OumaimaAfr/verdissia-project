@@ -29,7 +29,20 @@ public class DemandeClientController {
             return ResponseEntity.status(HttpStatus.CREATED).body(response);
         } catch (RuntimeException e) {
             log.error("Erreur lors de la création de la demande: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+            
+            // Handle specific business exceptions
+            if (e.getMessage().contains("Vous avez déjà une demande en cours de traitement")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(DemandeResponse.builder()
+                                .motifRejet(e.getMessage())
+                                .build());
+            }
+            
+            // Handle other runtime errors (400)
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(DemandeResponse.builder()
+                            .motifRejet(e.getMessage())
+                            .build());
         } catch (Exception e) {
             log.error("Erreur inattendue lors de la création de la demande: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
