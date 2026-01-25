@@ -14,5 +14,6 @@ llm:
   model: mistral-small-latest
   api-key: tWZkgUi6tVKU78YKMa2wN5zMacTgEAXE
   timeout-seconds: 20
+  mock-mode: true
   threshold-auto-approve: 0.85
   threshold-auto-reject: 0.60
