@@ -9,11 +9,13 @@ import com.verdissia.mapper.DemandeMapper;
 import com.verdissia.model.Client;
 import com.verdissia.model.DemandeClient;
 import com.verdissia.model.Offre;
+import com.verdissia.model.SignatureToken;
 import com.verdissia.repository.ClientRepository;
 import com.verdissia.repository.DemandeClientRepository;
 import com.verdissia.repository.OffreRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -38,7 +40,25 @@ public class DemandeClientService {
 
     private final DemandeMapper demandeMapper; // Continue d'ici
 
+    private final EmailService emailService;
+    private final TokenService tokenService;
+
+    @Value("${spring.mail.username}")
+    private String mailUsername;
+
+    @Value("${spring.mail.password}")
+    private String mailPassword;
+
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+    public DemandeResponse getDemandeById(String id) {
+        log.info("Fetching demande with id: {}", id);
+
+        DemandeClient demande = demandeClientRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Demande not found with id: " + id));
+
+        return demandeMapper.toResponse(demande);
+    }
 
     public DemandeResponse createDemande(DemandeClientRequest request) {
         log.info("Creating demande for client: {}", request.getInformationsPersonnelles().getEmail());
@@ -47,21 +67,21 @@ public class DemandeClientService {
             // Check if client already has a pending demande
             String referenceClient = request.getInformationsPersonnelles().getReferenceClient();
             List<DemandeClient> allClientDemandes = demandeClientRepository.findByReferenceClient(referenceClient);
-            
+
             // Filter for pending statuses in Java
             boolean hasPendingDemande = allClientDemandes.stream()
                     .anyMatch(d -> d.getStatut() == DemandeClient.StatutDemande.EN_ATTENTE ||
                                   d.getStatut() == DemandeClient.StatutDemande.EN_ATTENTE_SIGNATURE ||
                                   d.getStatut() == DemandeClient.StatutDemande.EN_COURS);
-            
+
             if (hasPendingDemande) {
                 log.warn("Client {} already has a pending demande", referenceClient);
                 throw new RuntimeException("Vous avez déjà une demande en cours de traitement");
             }
-            
+
             // Validate required fields
             ValidationResult validation = validateRequiredFields(request);
-            
+
             if (validation.isValid()) {
                 // All fields present - save directly with EN_ATTENTE_SIGNATURE status
                 return processCompleteDemande(request);
@@ -69,7 +89,7 @@ public class DemandeClientService {
                 // Missing fields - technical error
                 return processIncompleteDemande(request, validation.getErrors());
             }
-            
+
         } catch (RuntimeException e) {
             // Re-throw business exceptions (like pending demande)
             throw e;
@@ -78,17 +98,24 @@ public class DemandeClientService {
             throw new RuntimeException("Failed to create demande: " + e.getMessage(), e);
         }
     }
-    
+
     private DemandeResponse processCompleteDemande(DemandeClientRequest request) {
         log.info("Processing complete demande for client: {}", request.getInformationsPersonnelles().getEmail());
-        
+
         try {
             // Find or create client
             Client client = findOrCreateClient(request.getInformationsPersonnelles(), request.getInformationsFourniture());
-            
+
             // Find offre
             Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
                     .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
+
+            // Parse date if provided
+            LocalDateTime dateMiseEnService = null;
+            if (request.getInformationsFourniture().getDateMiseEnService() != null &&
+                    !request.getInformationsFourniture().getDateMiseEnService().isEmpty()) {
+                dateMiseEnService = java.time.LocalDate.parse(request.getInformationsFourniture().getDateMiseEnService(), DATE_FORMATTER).atStartOfDay();
+            }
 
             // Create demande with EN_ATTENTE_SIGNATURE status
             DemandeClient demande = DemandeClient.builder()
@@ -99,26 +126,46 @@ public class DemandeClientService {
                     .consentementClient(request.getConsentementClient())
                     .statut(DemandeClient.StatutDemande.EN_ATTENTE_SIGNATURE)
                     .build();
-            
+
             DemandeClient savedDemande = demandeClientRepository.save(demande);
             log.info("Demande created successfully with id: {} and status EN_ATTENTE_SIGNATURE", savedDemande.getId());
-            
+
+            // Generate token and send email
+            try {
+                String clientEmail = savedDemande.getClient().getEmail();
+                String clientName = savedDemande.getClient().getPrenom() + " " + savedDemande.getClient().getNom();
+
+                SignatureToken token = tokenService.generateToken(clientEmail, savedDemande);
+
+                // Only send email if properly configured (not using default values)
+                if (!"your-mailtrap-username".equals(mailUsername) && !"your-mailtrap-password".equals(mailPassword)) {
+                    emailService.sendSignatureEmail(clientEmail, token.getToken(), clientName);
+                    log.info("Signature email sent to {} for demande {}", clientEmail, savedDemande.getId());
+                } else {
+                    log.warn("Email not sent - using default configuration. Token generated for testing: {}", token.getToken());
+                    log.info("To enable emails, update spring.mail.username and spring.mail.password in application.properties");
+                }
+            } catch (Exception e) {
+                log.error("Failed to send signature email for demande {}: {}", savedDemande.getId(), e.getMessage(), e);
+                // Continue with the process even if email fails
+            }
+
             return demandeMapper.toResponse(savedDemande);
-            
+
         } catch (Exception e) {
             log.error("Error processing complete demande", e);
             throw new RuntimeException("Failed to process complete demande: " + e.getMessage(), e);
         }
     }
-    
+
     private DemandeResponse processIncompleteDemande(DemandeClientRequest request, String errors) {
-        log.info("Processing incomplete demande for client: {} with errors: {}", 
+        log.info("Processing incomplete demande for client: {} with errors: {}",
                 request.getInformationsPersonnelles().getEmail(), errors);
-        
+
         try {
             // Find or create client
             Client client = findOrCreateClient(request.getInformationsPersonnelles(), request.getInformationsFourniture());
-            
+
             // Find offre
             Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
                     .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
@@ -134,19 +181,19 @@ public class DemandeClientService {
                     .motifRejet("Erreur technique: champs obligatoires manquants - " + errors)
                     .dateTraitement(LocalDateTime.now())
                     .build();
-            
+
             DemandeClient savedDemande = demandeClientRepository.save(demande);
-            log.info("Demande created with error status for client: {} - {}", 
+            log.info("Demande created with error status for client: {} - {}",
                     savedDemande.getId(), savedDemande.getMotifRejet());
-            
+
             return demandeMapper.toResponse(savedDemande);
-            
+
         } catch (Exception e) {
             log.error("Error processing incomplete demande", e);
             throw new RuntimeException("Failed to process incomplete demande: " + e.getMessage(), e);
         }
     }
-    
+
     private ValidationResult validateRequiredFields(DemandeClientRequest request) {
         StringBuilder errors = new StringBuilder();
         
@@ -174,7 +221,7 @@ public class DemandeClientService {
                 errors.append("Téléphone manquant; ");
             }
         }
-        
+
         // Validate informations fourniture
         if (request.getInformationsFourniture() == null) {
             errors.append("Informations de fourniture manquantes; ");
@@ -199,7 +246,7 @@ public class DemandeClientService {
                 errors.append("Offre manquante; ");
             }
         }
-        
+
         // Validate other required fields
         if (request.getTypeDemande() == null || request.getTypeDemande().trim().isEmpty()) {
             errors.append("Type de demande manquant; ");
@@ -207,7 +254,7 @@ public class DemandeClientService {
         if (request.getConsentementClient() == null) {
             errors.append("Consentement client manquant; ");
         }
-        
+
         boolean isValid = errors.length() == 0;
         return new ValidationResult(isValid, isValid ? "" : errors.toString());
     }
@@ -215,21 +262,21 @@ public class DemandeClientService {
     private static class ValidationResult {
         private final boolean valid;
         private final String errors;
-        
+
         public ValidationResult(boolean valid, String errors) {
             this.valid = valid;
             this.errors = errors;
         }
-        
+
         public boolean isValid() {
             return valid;
         }
-        
+
         public String getErrors() {
             return errors;
         }
     }
-    
+
     private Client findOrCreateClient(DemandeClientRequest.InformationsPersonnelles infos, DemandeClientRequest.InformationsFourniture fourniture) {
         return clientRepository.findByEmail(infos.getEmail())
                 .orElseGet(() -> createNewClient(infos, fourniture));
