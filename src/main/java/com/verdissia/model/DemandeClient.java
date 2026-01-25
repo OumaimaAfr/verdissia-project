@@ -49,8 +49,6 @@ public class DemandeClient {
     @Column(name = "date_traitement")
     private LocalDateTime dateTraitement;
 
-    @OneToOne(mappedBy = "demande", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private Contrat contrat;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "offre_id", nullable = false)
@@ -78,7 +76,6 @@ public class DemandeClient {
         d.dateTraitement = null;
 
         d.motifRejet = null;
-        d.contrat = null;
 
         return d;
 
