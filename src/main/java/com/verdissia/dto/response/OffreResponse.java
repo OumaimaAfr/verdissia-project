@@ -20,5 +20,4 @@ public class OffreResponse {
     private String typeEnergie;
     private String preferenceOffre;
     private BigDecimal prix;
-    private LocalDateTime dateMiseEnService;
 }

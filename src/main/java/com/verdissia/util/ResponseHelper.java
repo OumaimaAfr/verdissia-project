@@ -3,6 +3,7 @@ package com.verdissia.util;
 import com.verdissia.constants.ApplicationConstants;
 import com.verdissia.dto.response.IResponseDTO;
 import com.verdissia.dto.response.ResponseDTO;
+import com.verdissia.dto.response.SimpleStatusResponse;
 import lombok.experimental.UtilityClass;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -28,6 +29,11 @@ public class ResponseHelper {
         responseDTO.setStatus(ApplicationConstants.STATUT_OK);
         responseDTO.setData(data);
         return ResponseEntity.status(httpStatus).body(responseDTO);
+    }
+
+    public static ResponseEntity<IResponseDTO> returnSuccessOnly(HttpStatus httpStatus) {
+        SimpleStatusResponse response = new SimpleStatusResponse(ApplicationConstants.STATUT_OK);
+        return ResponseEntity.status(httpStatus).body(response);
     }
 
     public static ResponseEntity<IResponseDTO> returnError(HttpStatusCode httpStatus) {

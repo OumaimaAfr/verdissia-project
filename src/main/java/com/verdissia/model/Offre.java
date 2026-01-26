@@ -38,9 +38,6 @@ public class Offre {
     @Column(name = "prix", precision = 10, scale = 6)
     private BigDecimal prix;
 
-    @Column(name = "date_mise_service")
-    private LocalDateTime dateMiseEnService;
-
     public enum TypeEnergie {
         GAZ, ELECTRICITE, DUAL
     }

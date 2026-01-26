@@ -47,6 +47,8 @@ public class DemandeClient {
     @Column(name = "date_traitement")
     private LocalDateTime dateTraitement;
 
+    @Column(name = "date_mise_service")
+    private LocalDateTime dateMiseEnService;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "offre_id", nullable = false)

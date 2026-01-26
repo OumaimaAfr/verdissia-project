@@ -1,5 +1,8 @@
 package com.verdissia.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ResponseDTO<T> implements IResponseDTO<T> {
 
     private String status;

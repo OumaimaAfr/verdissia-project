@@ -27,7 +27,6 @@ public class OffreService {
                         .typeEnergie(o.getTypeEnergie() != null ? o.getTypeEnergie().name() : null)
                         .preferenceOffre(o.getPreferenceOffre())
                         .prix(o.getPrix())
-                        .dateMiseEnService(o.getDateMiseEnService())
                         .build())
                 .collect(Collectors.toList());
     }
