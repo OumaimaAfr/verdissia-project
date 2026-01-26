@@ -1,5 +1,6 @@
 package com.verdissia.service;
 
+import com.verdissia.dto.ValidationResult;
 import com.verdissia.dto.request.DemandeClientRequest;
 import com.verdissia.dto.response.DemandeResponse;
 import com.verdissia.llm.LlmMapper;
@@ -52,16 +53,16 @@ public class DemandeClientService {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     public DemandeResponse getDemandeById(String id) {
-        log.info("Fetching demande with id: {}", id);
+        log.info("Récupération de la demande avec l'identifiant: {}", id);
 
         DemandeClient demande = demandeClientRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Demande not found with id: " + id));
+                .orElseThrow(() -> new RuntimeException("Demande non trouvée avec l'identifiant: " + id));
 
         return demandeMapper.toResponse(demande);
     }
 
     public DemandeResponse createDemande(DemandeClientRequest request) {
-        log.info("Creating demande for client: {}", request.getInformationsPersonnelles().getEmail());
+        log.info("Création de la demande pour le client: {}", request.getInformationsPersonnelles().getEmail());
         
         try {
             // Check if client already has a pending demande
@@ -75,7 +76,7 @@ public class DemandeClientService {
                                   d.getStatut() == DemandeClient.StatutDemande.EN_COURS);
 
             if (hasPendingDemande) {
-                log.warn("Client {} already has a pending demande", referenceClient);
+                log.warn("Le client {} a déjà une demande en cours", referenceClient);
                 throw new RuntimeException("Vous avez déjà une demande en cours de traitement");
             }
 
@@ -83,24 +84,20 @@ public class DemandeClientService {
             ValidationResult validation = validateRequiredFields(request);
 
             if (validation.isValid()) {
-                // All fields present - save directly with EN_ATTENTE_SIGNATURE status
+                // All fields present - save directly with EN_ATTENTE_SIGNATURE status and send email
                 return processCompleteDemande(request);
             } else {
-                // Missing fields - technical error
-                return processIncompleteDemande(request, validation.getErrors());
+                // Missing fields - return error without saving
+                throw new RuntimeException("Champs obligatoires manquants: " + validation.getErrors());
             }
-
-        } catch (RuntimeException e) {
-            // Re-throw business exceptions (like pending demande)
-            throw e;
         } catch (Exception e) {
-            log.error("Error creating demande for client: {}", request.getInformationsPersonnelles().getEmail(), e);
-            throw new RuntimeException("Failed to create demande: " + e.getMessage(), e);
+            log.error("Erreur lors de la création de la demande pour le client: {}", request.getInformationsPersonnelles().getEmail(), e);
+            throw new RuntimeException("Échec de la création de la demande: " + e.getMessage(), e);
         }
     }
 
     private DemandeResponse processCompleteDemande(DemandeClientRequest request) {
-        log.info("Processing complete demande for client: {}", request.getInformationsPersonnelles().getEmail());
+        log.info("Traitement de la demande complète pour le client: {}", request.getInformationsPersonnelles().getEmail());
 
         try {
             // Find or create client
@@ -108,7 +105,7 @@ public class DemandeClientService {
 
             // Find offre
             Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
-                    .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
+                    .orElseThrow(() -> new RuntimeException("Offre non trouvée avec l'identifiant: " + request.getInformationsFourniture().getOffre()));
 
             // Parse date if provided
             LocalDateTime dateMiseEnService = null;
@@ -124,73 +121,39 @@ public class DemandeClientService {
                     .client(client)
                     .offre(offre)
                     .consentementClient(request.getConsentementClient())
+                    .dateMiseEnService(dateMiseEnService)
                     .statut(DemandeClient.StatutDemande.EN_ATTENTE_SIGNATURE)
                     .build();
 
             DemandeClient savedDemande = demandeClientRepository.save(demande);
-            log.info("Demande created successfully with id: {} and status EN_ATTENTE_SIGNATURE", savedDemande.getId());
+            log.info("Demande créée avec succès avec l'identifiant: {} et statut EN_ATTENTE_SIGNATURE", savedDemande.getId());
 
             // Generate token and send email
-            try {
-                String clientEmail = savedDemande.getClient().getEmail();
-                String clientName = savedDemande.getClient().getPrenom() + " " + savedDemande.getClient().getNom();
-
-                SignatureToken token = tokenService.generateToken(clientEmail, savedDemande);
-
-                // Only send email if properly configured (not using default values)
-                if (!"your-mailtrap-username".equals(mailUsername) && !"your-mailtrap-password".equals(mailPassword)) {
-                    emailService.sendSignatureEmail(clientEmail, token.getToken(), clientName);
-                    log.info("Signature email sent to {} for demande {}", clientEmail, savedDemande.getId());
-                } else {
-                    log.warn("Email not sent - using default configuration. Token generated for testing: {}", token.getToken());
-                    log.info("To enable emails, update spring.mail.username and spring.mail.password in application.properties");
-                }
-            } catch (Exception e) {
-                log.error("Failed to send signature email for demande {}: {}", savedDemande.getId(), e.getMessage(), e);
-                // Continue with the process even if email fails
-            }
+            sendSignatureEmail(savedDemande);
 
             return demandeMapper.toResponse(savedDemande);
 
         } catch (Exception e) {
-            log.error("Error processing complete demande", e);
-            throw new RuntimeException("Failed to process complete demande: " + e.getMessage(), e);
+            log.error("Erreur lors du traitement de la demande complète", e);
+            throw new RuntimeException("Échec du traitement de la demande complète: " + e.getMessage(), e);
         }
     }
 
-    private DemandeResponse processIncompleteDemande(DemandeClientRequest request, String errors) {
-        log.info("Processing incomplete demande for client: {} with errors: {}",
-                request.getInformationsPersonnelles().getEmail(), errors);
-
+    private void sendSignatureEmail(DemandeClient savedDemande) {
         try {
-            // Find or create client
-            Client client = findOrCreateClient(request.getInformationsPersonnelles(), request.getInformationsFourniture());
+            String clientEmail = savedDemande.getClient().getEmail();
+            String clientName = savedDemande.getClient().getPrenom() + " " + savedDemande.getClient().getNom();
 
-            // Find offre
-            Offre offre = offreRepository.findById(request.getInformationsFourniture().getOffre())
-                    .orElseThrow(() -> new RuntimeException("Offre not found with id: " + request.getInformationsFourniture().getOffre()));
+            // Check for existing active token or generate new one
+            SignatureToken token = tokenService.findActiveTokenOrGenerateNew(clientEmail, savedDemande);
 
-            // Create demande with EN_ERREUR status
-            DemandeClient demande = DemandeClient.builder()
-                    .typeDemande(request.getTypeDemande())
-                    .referenceClient(request.getInformationsPersonnelles().getReferenceClient())
-                    .client(client)
-                    .offre(offre)
-                    .consentementClient(request.getConsentementClient())
-                    .statut(DemandeClient.StatutDemande.EN_ERREUR)
-                    .motifRejet("Erreur technique: champs obligatoires manquants - " + errors)
-                    .dateTraitement(LocalDateTime.now())
-                    .build();
-
-            DemandeClient savedDemande = demandeClientRepository.save(demande);
-            log.info("Demande created with error status for client: {} - {}",
-                    savedDemande.getId(), savedDemande.getMotifRejet());
-
-            return demandeMapper.toResponse(savedDemande);
+            // Send email with the token
+            emailService.sendSignatureEmail(clientEmail, token.getToken(), clientName);
+            log.info("Email de signature envoyé à {} pour la demande {} avec token {}",
+                    clientEmail, savedDemande.getId(), token.getToken());
 
         } catch (Exception e) {
-            log.error("Error processing incomplete demande", e);
-            throw new RuntimeException("Failed to process incomplete demande: " + e.getMessage(), e);
+            log.error("Échec de l'envoi de l'email de signature pour la demande {}: {}", savedDemande.getId(), e.getMessage(), e);
         }
     }
 
@@ -258,24 +221,6 @@ public class DemandeClientService {
         boolean isValid = errors.length() == 0;
         return new ValidationResult(isValid, isValid ? "" : errors.toString());
     }
-    
-    private static class ValidationResult {
-        private final boolean valid;
-        private final String errors;
-
-        public ValidationResult(boolean valid, String errors) {
-            this.valid = valid;
-            this.errors = errors;
-        }
-
-        public boolean isValid() {
-            return valid;
-        }
-
-        public String getErrors() {
-            return errors;
-        }
-    }
 
     private Client findOrCreateClient(DemandeClientRequest.InformationsPersonnelles infos, DemandeClientRequest.InformationsFourniture fourniture) {
         return clientRepository.findByEmail(infos.getEmail())
@@ -296,5 +241,23 @@ public class DemandeClientService {
                 .build();
         
         return clientRepository.save(client);
+    }
+
+    public DemandeClient getDemandeEntityById(String id) {
+        return demandeClientRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Demande non trouvée avec l'ID: " + id));
+    }
+
+    public void updateDemandeStatus(String id, String statut) {
+        DemandeClient demande = getDemandeEntityById(id);
+        try {
+            DemandeClient.StatutDemande newStatut = DemandeClient.StatutDemande.valueOf(statut);
+            demande.setStatut(newStatut);
+            demande.setDateTraitement(LocalDateTime.now());
+            demandeClientRepository.save(demande);
+            log.info("Updated demande {} status to {}", id, statut);
+        } catch (IllegalArgumentException e) {
+            throw new RuntimeException("Statut invalide: " + statut);
+        }
     }
 }

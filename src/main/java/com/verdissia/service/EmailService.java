@@ -56,7 +56,6 @@ public class EmailService {
             TemplateService.TemplateVariables variables = new TemplateService.TemplateVariables()
                 .add("clientName", clientName)
                 .add("signatureUrl", signatureUrl)
-                .add("fromEmail", fromEmail)
                 .add("token", token)
                 .add("tokenShort", token.length() > 8 ? token.substring(0, 8).toUpperCase() : token.toUpperCase());
             

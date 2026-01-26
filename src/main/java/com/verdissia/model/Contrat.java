@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 @Table(name = "contrat")
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class Contrat {
@@ -69,13 +70,21 @@ public class Contrat {
     @Column(name = "paiement_traite", length = 20)
     private Boolean paiementTraite;
 
-    @Column(name = "date_mise_service")
-    private LocalDateTime dateMiseEnService;
-
     @Column(name = "consentement_client", nullable = false)
     private Boolean consentementClient;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "statut_llm", nullable = false, length = 20)
+    private StatutLlm statutLlm = StatutLlm.PENDING;
+
+    @Column(name = "date_mise_service")
+    private LocalDateTime dateMiseEnService;
+
     public enum Energie {
         GAZ, ELECTRICITE, DUAL
+    }
+
+    public enum StatutLlm {
+        PENDING, TRAITE
     }
 }
