@@ -18,6 +18,8 @@ public class DemandeClientRequest {
 
     private Boolean consentementClient;
 
+    private String iban;
+
     @Data
     @Builder
     @NoArgsConstructor
