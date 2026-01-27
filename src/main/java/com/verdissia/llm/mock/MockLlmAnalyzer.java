@@ -24,45 +24,64 @@ public class MockLlmAnalyzer {
     public LlmAnalysisResult analyzeContrat(Contrat contrat) {
         log.info("Début de l'analyse LLM pour le contrat {} - {}", contrat.getId(), contrat.getNumeroContrat());
 
-        // Règle spéciale: Si le score de confiance est < 0.50, demander une revue manuelle
-        // Cette règle s'applique après toutes les vérifications de base
-        LlmAnalysisResult preliminaryResult = performBasicAnalysis(contrat);
-        
-        // Simuler un calcul de confiance basé sur la complexité du cas
-        BigDecimal confidence = calculateConfidence(contrat, preliminaryResult);
-        
-        if (confidence.compareTo(new BigDecimal("0.50")) < 0) {
-            log.warn("Confiance très faible ({}) pour le contrat {} - Revue manuelle requise", confidence, contrat.getId());
+        try {
+            // TEST TEMPORAIRE: Forcer une erreur pour le contrat ID 999
+            if (contrat.getId() != null && contrat.getId() == 999) {
+                throw new RuntimeException("Erreur technique simulée pour le test");
+            }
+            
+            // Règle spéciale: Si le score de confiance est < 0.50, demander une revue manuelle
+            // Cette règle s'applique après toutes les vérifications de base
+            LlmAnalysisResult preliminaryResult = performBasicAnalysis(contrat);
+            
+            // Simuler un calcul de confiance basé sur la complexité du cas
+            BigDecimal confidence = calculateConfidence(contrat, preliminaryResult);
+            
+            if (confidence.compareTo(new BigDecimal("0.50")) < 0) {
+                log.warn("Confiance très faible ({}) pour le contrat {} - Revue manuelle requise", confidence, contrat.getId());
+                return LlmAnalysisResult.builder()
+                        .decision("REJET")
+                        .motifCode("REVUE_MANUELLE")
+                        .motif("Score de confiance insuffisant - Revue manuelle requise")
+                        .actionConseiller("EXAMINER")
+                        .details("Le score de confiance de " + confidence + " est inférieur au seuil de 0.50. Une revue manuelle par un conseiller est nécessaire.")
+                        .confidence(confidence)
+                        .build();
+            }
+            
+            if (confidence.compareTo(new BigDecimal("0.60")) < 0) {
+                log.warn("Confiance faible ({}) pour le contrat {} - Vérification obligatoire requise", confidence, contrat.getId());
+                return LlmAnalysisResult.builder()
+                        .decision("VALIDE")
+                        .motifCode("VERIFICATION_OBLIGATOIRE")
+                        .motif("Score de confiance faible - Vérification obligatoire requise")
+                        .actionConseiller("VÉRIFICATION_OBLIGATOIRE")
+                        .details("Le score de confiance de " + confidence + " est inférieur au seuil de 0.60. Une vérification obligatoire par un conseiller est nécessaire avant de traiter la demande.")
+                        .confidence(confidence)
+                        .build();
+            }
+            
             return LlmAnalysisResult.builder()
-                    .decision("REJET")
-                    .motifCode("REVUE_MANUELLE")
-                    .motif("Score de confiance insuffisant - Revue manuelle requise")
-                    .actionConseiller("EXAMINER")
-                    .details("Le score de confiance de " + confidence + " est inférieur au seuil de 0.50. Une revue manuelle par un conseiller est nécessaire.")
+                    .decision(preliminaryResult.getDecision())
+                    .motifCode(preliminaryResult.getMotifCode())
+                    .motif(preliminaryResult.getMotif())
+                    .actionConseiller(preliminaryResult.getActionConseiller())
+                    .details(preliminaryResult.getDetails())
                     .confidence(confidence)
                     .build();
-        }
-        
-        if (confidence.compareTo(new BigDecimal("0.60")) < 0) {
-            log.warn("Confiance faible ({}) pour le contrat {} - Vérification obligatoire requise", confidence, contrat.getId());
+                    
+        } catch (Exception e) {
+            log.error("Erreur technique lors de l'analyse LLM pour le contrat {} - {}", contrat.getId(), contrat.getNumeroContrat(), e);
+            // CAS ERROR: actionConseiller NULL
             return LlmAnalysisResult.builder()
-                    .decision("VALIDE")
-                    .motifCode("VERIFICATION_OBLIGATOIRE")
-                    .motif("Score de confiance faible - Vérification obligatoire requise")
-                    .actionConseiller("VÉRIFICATION_OBLIGATOIRE")
-                    .details("Le score de confiance de " + confidence + " est inférieur au seuil de 0.60. Une vérification obligatoire par un conseiller est nécessaire avant de traiter la demande.")
-                    .confidence(confidence)
+                    .decision("ERROR")
+                    .motifCode("TECHNICAL_ERROR")
+                    .motif("Erreur technique lors de l'analyse")
+                    .actionConseiller("ERREUR TECHNIQUE") // NULL pour les erreurs techniques
+                    .details("Une erreur technique est survenue: " + e.getMessage())
+                    .confidence(BigDecimal.ZERO)
                     .build();
         }
-        
-        return LlmAnalysisResult.builder()
-                .decision(preliminaryResult.getDecision())
-                .motifCode(preliminaryResult.getMotifCode())
-                .motif(preliminaryResult.getMotif())
-                .actionConseiller(preliminaryResult.getActionConseiller())
-                .details(preliminaryResult.getDetails())
-                .confidence(confidence)
-                .build();
     }
     
     private LlmAnalysisResult performBasicAnalysis(Contrat contrat) {
