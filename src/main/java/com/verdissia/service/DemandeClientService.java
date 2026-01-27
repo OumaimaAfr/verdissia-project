@@ -222,7 +222,7 @@ public class DemandeClientService {
     }
 
     private Client findOrCreateClient(DemandeClientRequest.InformationsPersonnelles infos, DemandeClientRequest.InformationsFourniture fourniture) {
-        return clientRepository.findByEmail(infos.getEmail())
+        return clientRepository.findByReferenceClient(infos.getReferenceClient())
                 .orElseGet(() -> createNewClient(infos, fourniture));
     }
     

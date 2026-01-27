@@ -35,7 +35,7 @@ public class ContractService {
         if (contratRepository.existsByReferenceClient(demande.getClientReference())) {
             contratRepository.findByReferenceClient(demande.getClientReference())
                 .ifPresent(existingContract -> log.warn("Found existing contract: numero={}, email={}", 
-                    existingContract.getNumeroContrat(), existingContract.getEmail()));
+                    existingContract.getNumeroContrat()));
             throw new RuntimeException("Un contrat existe déjà pour ce client");
         }
 
