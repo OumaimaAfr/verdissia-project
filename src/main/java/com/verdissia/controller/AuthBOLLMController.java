@@ -5,7 +5,9 @@ import com.verdissia.llm.mock.LlmAnalysisResult;
 import com.verdissia.llm.mock.MockLlmAnalyzer;
 import com.verdissia.model.Contrat;
 import com.verdissia.model.LlmDecision;
+import com.verdissia.model.User;
 import com.verdissia.repository.LlmDecisionRepository;
+import com.verdissia.repository.UserRepository;
 import com.verdissia.service.ContratLlmService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,14 +29,14 @@ public class AuthBOLLMController {
     private final MockLlmAnalyzer mockLlmAnalyzer;
     private final ContratLlmService contratLlmService;
     private final LlmDecisionRepository llmDecisionRepository;
+    private final UserRepository userRepository;
 
     @PostMapping("/login")
     public ResponseEntity<List<AuthResponse>> login(@RequestBody LoginRequest loginRequest) {
         log.info("Connexion du back office pour l'utilisateur: {}", loginRequest.getUsername());
         
         try {
-            // TODO: Implémenter la validation réelle du username/password ici
-            // Pour l'instant, on accepte n'importe quel username/password
+            // Validation des identifiants contre la base de données
             if (!isValidCredentials(loginRequest.getUsername(), loginRequest.getPassword())) {
                 log.warn("Identifiants invalides pour l'utilisateur: {}", loginRequest.getUsername());
                 return ResponseEntity.status(401).build();
@@ -138,10 +140,15 @@ public class AuthBOLLMController {
     }
     
     private boolean isValidCredentials(String username, String password) {
-        // Validation simple pour le hackathon
-        // En production, utiliser un vrai système d'authentification
-        return username != null && !username.trim().isEmpty() && 
-               password != null && !password.trim().isEmpty();
+        // Validation réelle contre la base de données
+        if (username == null || username.trim().isEmpty() || 
+            password == null || password.trim().isEmpty()) {
+            return false;
+        }
+        
+        return userRepository.findByUsername(username)
+                .map(user -> user.getActive() && password.equals(user.getPassword()))
+                .orElse(false);
     }
     
     public static class LoginRequest {
