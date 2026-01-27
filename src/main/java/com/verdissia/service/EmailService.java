@@ -17,7 +17,7 @@ public class EmailService {
     private final JavaMailSender mailSender;
     private final TemplateService templateService;
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    @Value("${app.frontend.url:http://localhost:5173}")
     private String frontendUrl;
 
     @Value("${app.email.from:noreply@verdissia.com}")
