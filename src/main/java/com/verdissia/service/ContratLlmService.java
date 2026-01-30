@@ -57,10 +57,9 @@ public class ContratLlmService {
         
         try {
             // Déclencher l'analyse LLM avec l'API externe
-            String prompt = promptTemplate.buildContratAnalysisPrompt(contrat);
-            log.info("Envoi du prompt à l'API externe pour contrat {}: {}", contrat.getId(), prompt);
+            log.info("Envoi du contrat à l'API externe pour analyse: {}", contrat.getId());
             
-            String externalResponse = externalLlmService.callExternalLlm(prompt);
+            String externalResponse = externalLlmService.callExternalLlm(contrat);
             log.info("Réponse brute de l'API externe pour contrat {}: {}", contrat.getId(), externalResponse);
             
             LlmAnalysisResult result = parseExternalResponse(externalResponse);
@@ -119,19 +118,56 @@ public class ContratLlmService {
         log.info("Tentative de parsing de la réponse externe: {}", response);
         
         try {
-            // Si la réponse est une simple chaîne de caractères, la convertir en format structuré
-            if (response.startsWith("\"") && response.endsWith("\"")) {
-                response = response.substring(1, response.length() - 1);
+            // Parser la réponse de l'API externe
+            tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+            ExternalApiResponse apiResponse = mapper.readValue(response, ExternalApiResponse.class);
+            
+            log.info("Réponse API externe - success: {}, reference: {}", 
+                    apiResponse.isSuccess(), apiResponse.getReference());
+            
+            if (!apiResponse.isSuccess()) {
+                log.error("L'API externe a retourné une erreur: {}", apiResponse.getMessage());
+                return LlmAnalysisResult.builder()
+                        .decision("ERROR")
+                        .motifCode("EXTERNAL_API_ERROR")
+                        .motif("Erreur de l'API externe: " + apiResponse.getMessage())
+                        .actionConseiller("ERREUR TECHNIQUE")
+                        .details("Référence: " + apiResponse.getReference() + " - " + apiResponse.getMessage())
+                        .confidence(java.math.BigDecimal.ZERO)
+                        .build();
             }
             
-            // Créer un résultat basé sur la réponse texte de l'API
+            // Extraire le JSON du message (il est encapsulé dans ```json\n...```)
+            String message = apiResponse.getMessage();
+            if (message.contains("```json")) {
+                int start = message.indexOf("```json") + 7;
+                int end = message.indexOf("```", start);
+                if (end > start) {
+                    String jsonContent = message.substring(start, end).trim();
+                    log.info("JSON extrait: {}", jsonContent);
+                    
+                    // Parser le contenu JSON de Mistral
+                    MistralResponseDTO mistralResponse = mapper.readValue(jsonContent, MistralResponseDTO.class);
+                    
+                    return LlmAnalysisResult.builder()
+                            .decision(mistralResponse.getDecision())
+                            .motifCode(mistralResponse.getMotifCode())
+                            .motif(mistralResponse.getMotif())
+                            .actionConseiller(mistralResponse.getActionConseiller())
+                            .details(mistralResponse.getDetails())
+                            .confidence(mistralResponse.getConfidence())
+                            .build();
+                }
+            }
+            
+            // Si on ne peut pas extraire le JSON, utiliser le message comme motif
             return LlmAnalysisResult.builder()
-                    .decision(determineDecisionFromResponse(response))
-                    .motifCode(determineMotifCodeFromResponse(response))
-                    .motif(response)
-                    .actionConseiller(determineActionFromResponse(response))
-                    .details("Analyse par API externe: " + response)
-                    .confidence(calculateConfidenceFromResponse(response))
+                    .decision("REJET")
+                    .motifCode("PARSING_ERROR")
+                    .motif("Impossible d'extraire la décision de la réponse")
+                    .actionConseiller("EXAMINER")
+                    .details("Réponse brute: " + message)
+                    .confidence(new java.math.BigDecimal("0.50"))
                     .build();
                     
         } catch (Exception e) {
@@ -149,44 +185,52 @@ public class ContratLlmService {
         }
     }
     
-    private String determineDecisionFromResponse(String response) {
-        String lowerResponse = response.toLowerCase();
-        if (lowerResponse.contains("valide") || lowerResponse.contains("approuve") || lowerResponse.contains("accepte")) {
-            return "VALIDE";
-        } else if (lowerResponse.contains("rejet") || lowerResponse.contains("invalide") || lowerResponse.contains("refuse")) {
-            return "REJET";
-        } else {
-            return "VALIDE"; // Par défaut
-        }
+    // DTO pour la réponse de l'API externe
+    private static class ExternalApiResponse {
+        private boolean success;
+        private String message;
+        private String reference;
+        private long timestamp;
+        
+        public boolean isSuccess() { return success; }
+        public void setSuccess(boolean success) { this.success = success; }
+        
+        public String getMessage() { return message; }
+        public void setMessage(String message) { this.message = message; }
+        
+        public String getReference() { return reference; }
+        public void setReference(String reference) { this.reference = reference; }
+        
+        public long getTimestamp() { return timestamp; }
+        public void setTimestamp(long timestamp) { this.timestamp = timestamp; }
     }
     
-    private String determineMotifCodeFromResponse(String response) {
-        String decision = determineDecisionFromResponse(response);
-        if ("VALIDE".equals(decision)) {
-            return "CONTRACT_VALID";
-        } else {
-            return "MANUAL_REVIEW";
-        }
-    }
-    
-    private String determineActionFromResponse(String response) {
-        String decision = determineDecisionFromResponse(response);
-        if ("VALIDE".equals(decision)) {
-            return "TRAITER";
-        } else {
-            return "EXAMINER";
-        }
-    }
-    
-    private java.math.BigDecimal calculateConfidenceFromResponse(String response) {
-        // Calculer un score de confiance basé sur la longueur et le contenu de la réponse
-        if (response.length() > 100) {
-            return new java.math.BigDecimal("0.85");
-        } else if (response.length() > 50) {
-            return new java.math.BigDecimal("0.75");
-        } else {
-            return new java.math.BigDecimal("0.65");
-        }
+    // DTO pour la réponse de Mistral
+    private static class MistralResponseDTO {
+        private String decision;
+        private String motifCode;
+        private String motif;
+        private String actionConseiller;
+        private String details;
+        private java.math.BigDecimal confidence;
+        
+        public String getDecision() { return decision; }
+        public void setDecision(String decision) { this.decision = decision; }
+        
+        public String getMotifCode() { return motifCode; }
+        public void setMotifCode(String motifCode) { this.motifCode = motifCode; }
+        
+        public String getMotif() { return motif; }
+        public void setMotif(String motif) { this.motif = motif; }
+        
+        public String getActionConseiller() { return actionConseiller; }
+        public void setActionConseiller(String actionConseiller) { this.actionConseiller = actionConseiller; }
+        
+        public String getDetails() { return details; }
+        public void setDetails(String details) { this.details = details; }
+        
+        public java.math.BigDecimal getConfidence() { return confidence; }
+        public void setConfidence(java.math.BigDecimal confidence) { this.confidence = confidence; }
     }
     
     // DTO pour parser la réponse de l'API externe

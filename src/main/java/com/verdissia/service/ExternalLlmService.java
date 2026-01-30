@@ -1,11 +1,14 @@
 package com.verdissia.service;
 
+import com.verdissia.model.Contrat;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+
+import java.time.LocalDate;
 
 @Service
 @RequiredArgsConstructor
@@ -14,22 +17,34 @@ public class ExternalLlmService {
 
     private final WebClient webClient;
     
-    @Value("${external.llm.base-url:https://bot-backend-1-j9ii.onrender.com/api/chat/message}")
+    @Value("${external.llm.base-url:https://bot-backend-1-j9ii.onrender.com/api/verdissia}")
     private String externalLlmBaseUrl;
 
-    public String callExternalLlm(String prompt) {
+    public String callExternalLlm(Contrat contrat) {
         log.info("Appel à l'API LLM externe: {}", externalLlmBaseUrl);
-        log.info("Prompt envoyé: {}", prompt.substring(0, Math.min(200, prompt.length())));
+        log.info("Contrat analysé: {} - {}", contrat.getId(), contrat.getNumeroContrat());
 
         try {
-            // Construire le corps de la requête selon le format attendu par votre API
-            ExternalLlmRequest request = ExternalLlmRequest.builder()
-                    .message(prompt)
-                    .clientType("electricity") // Par défaut, peut être adapté selon le contrat
+            // Construire le corps de la requête selon le format VerdissiaRequest
+            VerdissiaRequest request = VerdissiaRequest.builder()
+                    .email(contrat.getEmail())
+                    .telephone(contrat.getTelephone())
+                    .adresse(contrat.getVoieLivraison())
+                    .typeEnergie(contrat.getTypeEnergie() != null ? String.valueOf(contrat.getTypeEnergie()) : "Electricité")
+                    .prix(contrat.getPrix() != null ? contrat.getPrix().doubleValue() : 0.0)
+                    .dateSignature(contrat.getDateSignature() != null ? 
+                        contrat.getDateSignature().toLocalDate() : java.time.LocalDate.now())
+                    .dateMiseEnService(contrat.getDateMiseEnService() != null ? 
+                        contrat.getDateMiseEnService().toLocalDate() : null)
+                    .consentement(contrat.getConsentementClient() != null ? 
+                        contrat.getConsentementClient().toString() : "false")
                     .build();
 
+            log.info("Requête envoyée: email={}, téléphone={}, typeEnergie={}, dateMiseEnService={}", 
+                    request.getEmail(), request.getTelephone(), request.getTypeEnergie(), request.getDateMiseEnService());
+
             String response = webClient.post()
-                    .uri(externalLlmBaseUrl) // Adapter l'endpoint selon votre API
+                    .uri(externalLlmBaseUrl) // Endpoint principal sans /analyze
                     .header("Content-Type", "application/json")
                     .bodyValue(request)
                     .retrieve()
@@ -46,49 +61,82 @@ public class ExternalLlmService {
         }
     }
 
-    // DTO pour la requête vers l'API externe
-    private static class ExternalLlmRequest {
-        private String message;
-        private String clientType;
+    // DTO VerdissiaRequest pour l'API externe
+    @Data
+    public static class VerdissiaRequest {
+        private String email;
+        private String telephone;
+        private String adresse;
+        private String typeEnergie;
+        private Double prix;
+        private LocalDate dateSignature;
+        private LocalDate dateMiseEnService;
+        private String consentement;
 
-        public static ExternalLlmRequestBuilder builder() {
-            return new ExternalLlmRequestBuilder();
+        public static VerdissiaRequestBuilder builder() {
+            return new VerdissiaRequestBuilder();
         }
 
-        public String getMessage() {
-            return message;
-        }
+        public static class VerdissiaRequestBuilder {
+            private String email;
+            private String telephone;
+            private String adresse;
+            private String typeEnergie;
+            private Double prix;
+            private LocalDate dateSignature;
+            private LocalDate dateMiseEnService;
+            private String consentement;
 
-        public void setMessage(String message) {
-            this.message = message;
-        }
-
-        public String getClientType() {
-            return clientType;
-        }
-
-        public void setClientType(String clientType) {
-            this.clientType = clientType;
-        }
-
-        public static class ExternalLlmRequestBuilder {
-            private String message;
-            private String clientType;
-
-            public ExternalLlmRequestBuilder message(String message) {
-                this.message = message;
+            public VerdissiaRequestBuilder email(String email) {
+                this.email = email;
                 return this;
             }
 
-            public ExternalLlmRequestBuilder clientType(String clientType) {
-                this.clientType = clientType;
+            public VerdissiaRequestBuilder telephone(String telephone) {
+                this.telephone = telephone;
                 return this;
             }
 
-            public ExternalLlmRequest build() {
-                ExternalLlmRequest request = new ExternalLlmRequest();
-                request.message = this.message;
-                request.clientType = this.clientType;
+            public VerdissiaRequestBuilder adresse(String adresse) {
+                this.adresse = adresse;
+                return this;
+            }
+
+            public VerdissiaRequestBuilder typeEnergie(String typeEnergie) {
+                this.typeEnergie = typeEnergie;
+                return this;
+            }
+
+            public VerdissiaRequestBuilder prix(Double prix) {
+                this.prix = prix;
+                return this;
+            }
+
+            public VerdissiaRequestBuilder dateSignature(LocalDate dateSignature) {
+                this.dateSignature = dateSignature;
+                return this;
+            }
+
+            public VerdissiaRequestBuilder dateMiseEnService(LocalDate dateMiseEnService) {
+                this.dateMiseEnService = dateMiseEnService;
+                return this;
+            }
+
+            public VerdissiaRequestBuilder consentement(String consentement) {
+                this.consentement = consentement;
+                return this;
+            }
+
+            public VerdissiaRequest build() {
+                VerdissiaRequest request = new VerdissiaRequest();
+                request.email = this.email;
+                request.telephone = this.telephone;
+                request.adresse = this.adresse;
+                request.typeEnergie = this.typeEnergie;
+                request.prix = this.prix;
+                request.dateSignature = this.dateSignature;
+                request.dateMiseEnService = this.dateMiseEnService;
+                request.consentement = this.consentement;
                 return request;
             }
         }
