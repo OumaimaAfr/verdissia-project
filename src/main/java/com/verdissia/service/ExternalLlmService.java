@@ -29,19 +29,28 @@ public class ExternalLlmService {
             VerdissiaRequest request = VerdissiaRequest.builder()
                     .email(contrat.getEmail())
                     .telephone(contrat.getTelephone())
-                    .adresse(contrat.getVoieLivraison())
-                    .typeEnergie(contrat.getTypeEnergie() != null ? String.valueOf(contrat.getTypeEnergie()) : "Electricité")
+                    .adresse(contrat.getVoieLivraison() + ", " + contrat.getCodePostalLivraison() + " " + contrat.getVilleLivraison())
+                    .typeEnergie(convertTypeEnergie(contrat.getTypeEnergie()))
                     .prix(contrat.getPrix() != null ? contrat.getPrix().doubleValue() : 0.0)
                     .dateSignature(contrat.getDateSignature() != null ? 
-                        contrat.getDateSignature().toLocalDate() : java.time.LocalDate.now())
+                        contrat.getDateSignature().toLocalDate() : java.time.LocalDate.now().minusDays(1))
                     .dateMiseEnService(contrat.getDateMiseEnService() != null ? 
-                        contrat.getDateMiseEnService().toLocalDate() : null)
+                        contrat.getDateMiseEnService().toLocalDate() : java.time.LocalDate.now().plusDays(3))
                     .consentement(contrat.getConsentementClient() != null ? 
                         contrat.getConsentementClient().toString() : "false")
                     .build();
 
-            log.info("Requête envoyée: email={}, téléphone={}, typeEnergie={}, dateMiseEnService={}", 
-                    request.getEmail(), request.getTelephone(), request.getTypeEnergie(), request.getDateMiseEnService());
+            log.info("Requête envoyée: email={}, téléphone={}, typeEnergie={}, prix={}, dateMiseEnService={}, Adresse={}",
+                    request.getEmail(), request.getTelephone(), request.getTypeEnergie(), request.getPrix(), request.getDateMiseEnService(), request.getAdresse());
+            
+            // Log du JSON complet envoyé pour debug
+            try {
+                tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+                String requestJson = mapper.writeValueAsString(request);
+                log.info("JSON complet envoyé à l'API externe: {}", requestJson);
+            } catch (Exception jsonEx) {
+                log.warn("Impossible de sérialiser la requête en JSON pour le log");
+            }
 
             String response = webClient.post()
                     .uri(externalLlmBaseUrl) // Endpoint principal sans /analyze
@@ -57,6 +66,13 @@ public class ExternalLlmService {
 
         } catch (Exception e) {
             log.error("Erreur lors de l'appel à l'API LLM externe: {}", e.getMessage(), e);
+            
+            // Si l'API externe est down, retourner une réponse par défaut
+            if (e.getMessage().contains("500") || e.getMessage().contains("Internal Server Error")) {
+                log.warn("L'API externe semble indisponible - utilisation de la réponse par défaut");
+                return "{\"success\":false,\"message\":\"Service externe indisponible - veuillez réessayer plus tard\",\"reference\":\"SYSTEM-ERROR\",\"timestamp\":" + System.currentTimeMillis() + "}";
+            }
+            
             throw new RuntimeException("Échec de l'appel à l'API LLM externe: " + e.getMessage(), e);
         }
     }
@@ -139,6 +155,21 @@ public class ExternalLlmService {
                 request.consentement = this.consentement;
                 return request;
             }
+        }
+    }
+    
+    private String convertTypeEnergie(Contrat.Energie energie) {
+        if (energie == null) return "Electricité";
+        
+        switch (energie) {
+            case GAZ:
+                return "Gaz";
+            case ELECTRICITE:
+                return "Electricité";
+            case DUAL:
+                return "Dual";
+            default:
+                return "Electricité";
         }
     }
 }

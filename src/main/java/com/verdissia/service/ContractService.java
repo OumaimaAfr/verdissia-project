@@ -50,7 +50,7 @@ public class ContractService {
                 .telephone(demande.getClientTelephone())
                 .typeEnergie(mapToEnergieType(demande.getOffreTypeEnergie()))
                 .libelleOffre(demande.getOffreLibelle())
-                .voieLivraison(buildAdresse(demande.getVoie(), demande.getCodePostal(), demande.getVille()))
+                .voieLivraison(demande.getVoie())
                 .codePostalLivraison(demande.getCodePostal())
                 .villeLivraison(demande.getVille())
                 .prix(BigDecimal.valueOf(demande.getOffrePrix()))
