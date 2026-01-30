@@ -127,13 +127,26 @@ public class ContratLlmService {
             
             if (!apiResponse.isSuccess()) {
                 log.error("L'API externe a retourné une erreur: {}", apiResponse.getMessage());
+                
+                // Extraire les informations du message
+                String message = apiResponse.getMessage();
+                log.info("Message à parser: {}", message);
+                
+                String motifMessage = extractMotifMessage(message);
+                String actionConseiller = extractActionConseillerFromMessage(message);
+                String details = extractDetailsFromMessage(message);
+                String motifCode = extractMotifCodeFromMessage(message);
+                
+                log.info("Résultats extraction - motifMessage: {}, actionConseiller: {}, motifCode: {}", 
+                        motifMessage, actionConseiller, motifCode);
+                
                 return LlmAnalysisResult.builder()
-                        .decision("ERROR")
-                        .motifCode("EXTERNAL_API_ERROR")
-                        .motif("Erreur de l'API externe: " + apiResponse.getMessage())
-                        .actionConseiller("ERREUR TECHNIQUE")
-                        .details("Référence: " + apiResponse.getReference() + " - " + apiResponse.getMessage())
-                        .confidence(java.math.BigDecimal.ZERO)
+                        .decision("REJET") // Si success=false, c'est un rejet
+                        .motifCode(motifCode)
+                        .motif(motifMessage)
+                        .actionConseiller(actionConseiller)
+                        .details(details)
+                        .confidence(new java.math.BigDecimal("0.75"))
                         .build();
             }
             
@@ -233,32 +246,109 @@ public class ContratLlmService {
         public void setConfidence(java.math.BigDecimal confidence) { this.confidence = confidence; }
     }
     
-    // DTO pour parser la réponse de l'API externe
-    private static class ExternalLlmResponseDTO {
-        private String decision;
-        private String motifCode;
-        private String motif;
-        private String actionConseiller;
-        private String details;
-        private java.math.BigDecimal confidence;
+    // Méthodes d'extraction du message
+    private String extractMotifMessage(String message) {
+        log.info("Extraction motif_message du message LLM: {}", message);
         
-        // Getters et Setters
-        public String getDecision() { return decision; }
-        public void setDecision(String decision) { this.decision = decision; }
+        String code = extractMotifCodeFromMessage(message);
+
+        return code;
+    }
+    
+    private String extractDetailsFromMessage(String message) {
+        log.info("Extraction details du message LLM: {}", message);
         
-        public String getMotifCode() { return motifCode; }
-        public void setMotifCode(String motifCode) { this.motifCode = motifCode; }
+        // Extraire tout après "Contrat rejet: " mais enlever "Action conseillée: ..."
+        if (message.contains("Contrat rejet:")) {
+            int start = message.indexOf("Contrat rejet:") + 14;
+            String details = message.substring(start).trim();
+            
+            // Enlever la partie "Action conseillée: ..." de la fin
+            if (details.contains("Action conseillée:")) {
+                int end = details.indexOf("Action conseillée:");
+                details = details.substring(0, end).trim();
+                // Enlever les ".." ou ". " de la fin s'ils existent
+                if (details.endsWith("..")) {
+                    details = details.substring(0, details.length() - 2).trim();
+                } else if (details.endsWith(".")) {
+                    details = details.substring(0, details.length() - 1).trim();
+                }
+            }
+            
+            log.info("Details extraits: {}", details);
+            return details;
+        }
+        return message;
+    }
+    
+    private String extractMotifCodeFromMessage(String message) {
+        log.info("Extraction motif_code du message LLM: {}", message);
         
-        public String getMotif() { return motif; }
-        public void setMotif(String motif) { this.motif = motif; }
+        // Chercher "Contrat rejet: " et extraire le motif principal
+        if (message.contains("Contrat rejet:")) {
+            int start = message.indexOf("Contrat rejet:") + 14;
+            int end = message.indexOf("..", start);
+            if (end > start) {
+                String motifCode = message.substring(start, end).trim();
+                // Nettoyer et créer un code court
+                if (motifCode.toLowerCase().contains("téléphone")) {
+                    return "Numéro de téléphone Invalide";
+                } else if (motifCode.toLowerCase().contains("adresse")) {
+                    return "Adresse Invalide";
+                } else if (motifCode.toLowerCase().contains("email")) {
+                    return "Email Invalide";
+                } else if (motifCode.toLowerCase().contains("date")) {
+                    return "Date incohérente";
+                } else if (motifCode.toLowerCase().contains("consentement")) {
+                    return "Consentement manquant";
+                }
+                log.info("Motif_code extrait: {}", motifCode);
+                return "Contrat à revoir";
+            }
+        }
+        return "Contrat à revoir";
+    }
+    
+    private String extractActionConseillerFromMessage(String message) {
+        log.info("Extraction action_conseiller du message LLM: {}", message);
         
-        public String getActionConseiller() { return actionConseiller; }
-        public void setActionConseiller(String actionConseiller) { this.actionConseiller = actionConseiller; }
-        
-        public String getDetails() { return details; }
-        public void setDetails(String details) { this.details = details; }
-        
-        public java.math.BigDecimal getConfidence() { return confidence; }
-        public void setConfidence(java.math.BigDecimal confidence) { this.confidence = confidence; }
+        // Chercher "Action conseillée: " ou "Action conseillée:"
+        if (message.contains("Action conseillée:")) {
+            int start = message.indexOf("Action conseillée:") + 18;
+            int end = message.length();
+            // Chercher la fin de la phrase
+            int nextDot = message.indexOf(".", start);
+            if (nextDot > start && nextDot < start + 50) {
+                end = nextDot;
+            }
+            String action = message.substring(start, end).trim();
+            log.info("Action_conseiller extraite (méthode 1): {}", action);
+            return action;
+        }
+        // Alternative: chercher "Action conseillée:"
+        if (message.contains("Action conseillée:")) {
+            int start = message.indexOf("Action conseillée:") + 18;
+            int end = message.length();
+            int nextDot = message.indexOf(".", start);
+            if (nextDot > start && nextDot < start + 50) {
+                end = nextDot;
+            }
+            String action = message.substring(start, end).trim();
+            log.info("Action_conseiller extraite (méthode 2): {}", action);
+            return action;
+        }
+        String defaultAction = "EXAMINER";
+        log.info("Action_conseiller par défaut utilisée: {}", defaultAction);
+        return defaultAction; // Valeur par défaut
+    }
+    
+    private String extractDecisionFromMessage(String message) {
+        String lowerMessage = message.toLowerCase();
+        if (lowerMessage.contains("contrat rejet") || lowerMessage.contains("rejet")) {
+            return "REJET";
+        } else if (lowerMessage.contains("contrat valide") || lowerMessage.contains("validé") || lowerMessage.contains("approuvé")) {
+            return "VALIDE";
+        }
+        return "REJET"; // Par défaut
     }
 }
