@@ -1,12 +1,14 @@
 package com.verdissia.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.verdissia.llm.mistral.MistralClient;
 import com.verdissia.model.Contrat;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
 
 import java.time.LocalDate;
 
@@ -15,13 +17,12 @@ import java.time.LocalDate;
 @Slf4j
 public class ExternalLlmService {
 
-    private final WebClient webClient;
-    
-    @Value("${external.llm.base-url:https://bot-backend-1-j9ii.onrender.com/api/verdissia}")
-    private String externalLlmBaseUrl;
+    private final MistralClient mistralClient;
+    private final PromptTemplate promptTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
     public String callExternalLlm(Contrat contrat) {
-        log.info("Appel à l'API LLM externe: {}", externalLlmBaseUrl);
+        log.info("Appel à l'API Mistral (direct)");
         log.info("Contrat analysé: {} - {}", contrat.getId(), contrat.getNumeroContrat());
 
         try {
@@ -45,36 +46,148 @@ public class ExternalLlmService {
             
             // Log du JSON complet envoyé pour debug
             try {
-                tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
-                String requestJson = mapper.writeValueAsString(request);
-                log.info("JSON complet envoyé à l'API externe: {}", requestJson);
+                String requestJson = objectMapper.writeValueAsString(request);
+                log.info("JSON complet envoyé à Mistral (debug): {}", requestJson);
             } catch (Exception jsonEx) {
                 log.warn("Impossible de sérialiser la requête en JSON pour le log");
             }
 
-            String response = webClient.post()
-                    .uri(externalLlmBaseUrl) // Endpoint principal sans /analyze
-                    .header("Content-Type", "application/json")
-                    .bodyValue(request)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .timeout(java.time.Duration.ofSeconds(30))
-                    .block();
+            String prompt = promptTemplate.buildContratAnalysisPrompt(contrat);
+            String mistralContent = mistralClient.chat(prompt);
+            log.info("Réponse reçue de Mistral (content): {}", mistralContent);
 
-            log.info("Réponse reçue de l'API externe: {}", response);
-            return response;
+            String jsonContent = normalizeMistralContentToJson(mistralContent);
+            JsonNode analysisNode = objectMapper.readTree(jsonContent);
+
+            String decision = analysisNode.path("decision").asText(null);
+            String motifCode = analysisNode.path("motifCode").asText(null);
+            String motif = analysisNode.path("motif").asText("");
+            String actionConseiller = analysisNode.path("actionConseiller").asText("");
+            String details = normalizeDetailsToSingleLine(analysisNode.path("details").asText(""));
+
+            ObjectNode overridden = applyGeographicAddressOverride(contrat, analysisNode);
+            if (overridden != null) {
+                decision = overridden.path("decision").asText(null);
+                motifCode = overridden.path("motifCode").asText(null);
+                motif = overridden.path("motif").asText("");
+                actionConseiller = overridden.path("actionConseiller").asText("");
+                details = normalizeDetailsToSingleLine(overridden.path("details").asText(""));
+                jsonContent = objectMapper.writeValueAsString(overridden);
+            }
+
+            boolean success = decision != null && !"REJET".equalsIgnoreCase(decision);
+
+            String reference = "MISTRAL-" + contrat.getId();
+            long timestamp = System.currentTimeMillis();
+
+            String message;
+            if (success) {
+                message = "Contrat valide: " + motif + ".. Action conseillée: " + actionConseiller + "\n\n```json\n" + jsonContent + "\n```";
+            } else {
+                String code = motifCode != null && !motifCode.isBlank() ? motifCode : "REJET";
+                String rejectionDetails = details != null && !details.isBlank() ? details : motif;
+                message = "Contrat rejet: " + code + ".. " + rejectionDetails + ".. Action conseillée: " + actionConseiller;
+            }
+
+            String wrappedResponse = "{" +
+                    "\"success\":" + success + "," +
+                    "\"message\":" + objectMapper.writeValueAsString(message) + "," +
+                    "\"reference\":" + objectMapper.writeValueAsString(reference) + "," +
+                    "\"timestamp\":" + timestamp +
+                    "}";
+
+            log.info("Réponse (wrapper) renvoyée au parsing existant: {}", wrappedResponse);
+            return wrappedResponse;
 
         } catch (Exception e) {
-            log.error("Erreur lors de l'appel à l'API LLM externe: {}", e.getMessage(), e);
-            
-            // Si l'API externe est down, retourner une réponse par défaut
-            if (e.getMessage().contains("500") || e.getMessage().contains("Internal Server Error")) {
-                log.warn("L'API externe semble indisponible - utilisation de la réponse par défaut");
-                return "{\"success\":false,\"message\":\"Service externe indisponible - veuillez réessayer plus tard\",\"reference\":\"SYSTEM-ERROR\",\"timestamp\":" + System.currentTimeMillis() + "}";
-            }
-            
-            throw new RuntimeException("Échec de l'appel à l'API LLM externe: " + e.getMessage(), e);
+            log.error("Erreur lors de l'appel à Mistral: {}", e.getMessage(), e);
+            return "{\"success\":false,\"message\":\"Service LLM indisponible - veuillez réessayer plus tard\",\"reference\":\"SYSTEM-ERROR\",\"timestamp\":" + System.currentTimeMillis() + "}";
         }
+    }
+
+    private String normalizeMistralContentToJson(String content) {
+        if (content == null) {
+            throw new IllegalArgumentException("Mistral content is null");
+        }
+
+        String trimmed = content.trim();
+        if (trimmed.contains("```")) {
+            int start = trimmed.indexOf("```json");
+            if (start >= 0) {
+                start = start + 7;
+                int end = trimmed.indexOf("```", start);
+                if (end > start) {
+                    return trimmed.substring(start, end).trim();
+                }
+            }
+
+            int anyFenceStart = trimmed.indexOf("```");
+            if (anyFenceStart >= 0) {
+                int after = anyFenceStart + 3;
+                if (after < trimmed.length() && trimmed.charAt(after) == '\n') {
+                    after++;
+                }
+                int end = trimmed.indexOf("```", after);
+                if (end > after) {
+                    return trimmed.substring(after, end).trim();
+                }
+            }
+        }
+
+        return trimmed;
+    }
+
+    private String normalizeDetailsToSingleLine(String details) {
+        if (details == null) {
+            return "";
+        }
+
+        String normalized = details
+                .replaceAll("\\s+", " ")
+                .trim();
+
+        return normalized;
+    }
+
+    private ObjectNode applyGeographicAddressOverride(Contrat contrat, JsonNode analysisNode) {
+        if (contrat == null) {
+            return null;
+        }
+
+        String cp = contrat.getCodePostalLivraison();
+        String ville = contrat.getVilleLivraison();
+        if (cp == null || ville == null) {
+            return null;
+        }
+
+        String cpTrim = cp.trim();
+        String villeTrim = ville.trim();
+        if (cpTrim.length() < 2 || villeTrim.isBlank()) {
+            return null;
+        }
+
+        String prefix = cpTrim.substring(0, 2);
+        boolean mismatch = false;
+        if ("75".equals(prefix) && !villeTrim.equalsIgnoreCase("Paris")) {
+            mismatch = true;
+        }
+        if ("69".equals(prefix) && !villeTrim.equalsIgnoreCase("Lyon")) {
+            mismatch = true;
+        }
+
+        if (!mismatch) {
+            return null;
+        }
+
+        ObjectNode o = objectMapper.createObjectNode();
+        o.put("decision", "REJET");
+        o.put("motifCode", "ADDRESS_INVALID");
+        o.put("motif", "Adresse invalide : incohérence code postal / ville");
+        o.put("actionConseiller", "VÉRIFICATION_OBLIGATOIRE");
+        o.put("details", "Le code postal ne correspond pas à la ville indiquée ; vérification obligatoire.");
+        o.put("confidence", 0.75);
+
+        return o;
     }
 
     // DTO VerdissiaRequest pour l'API externe

@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 
 @Service
@@ -40,6 +41,8 @@ public class ContractService {
         }
 
         // Build contract using existing Contrat entity
+        LocalDateTime dateSignature = LocalDateTime.now();
+
         Contrat contrat = Contrat.builder()
                 .numeroContrat(generateNumeroContrat())
                 .referenceClient(demande.getClientReference())
@@ -54,8 +57,9 @@ public class ContractService {
                 .codePostalLivraison(demande.getCodePostal())
                 .villeLivraison(demande.getVille())
                 .prix(BigDecimal.valueOf(demande.getOffrePrix()))
-                .dateSignature(LocalDateTime.now())
+                .dateSignature(dateSignature)
                 .dateMiseEnService(demande.getDateMiseEnService())
+                .dateServiceStatus(computeDateServiceStatus(dateSignature, demande.getDateMiseEnService()))
                 .paiementTraite(false)
                 .consentementClient(demande.getConsentementClient())
                 .statutLlm(Contrat.StatutLlm.PENDING)
@@ -127,5 +131,22 @@ public class ContractService {
         } catch (Exception e) {
             log.warn("Could not mark token as used for demande {}: {}", demandeId, e.getMessage());
         }
+    }
+
+    private Contrat.DateServiceStatus computeDateServiceStatus(LocalDateTime dateSignature, LocalDateTime dateMiseEnService) {
+        if (dateSignature == null || dateMiseEnService == null) {
+            return Contrat.DateServiceStatus.INCOHERENT;
+        }
+
+        if (dateMiseEnService.isBefore(dateSignature)) {
+            return Contrat.DateServiceStatus.INCOHERENT;
+        }
+
+        long daysBetween = ChronoUnit.DAYS.between(dateSignature.toLocalDate(), dateMiseEnService.toLocalDate());
+        if (daysBetween >= 2) {
+            return Contrat.DateServiceStatus.OK;
+        }
+
+        return Contrat.DateServiceStatus.NON_STANDARD;
     }
 }

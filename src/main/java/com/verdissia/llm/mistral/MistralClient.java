@@ -1,5 +1,8 @@
 package com.verdissia.llm.mistral;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.verdissia.llm.LLMResponseStatus;
 import io.netty.channel.ChannelOption;
 import io.netty.handler.ssl.SslContext;
@@ -17,7 +20,6 @@ import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
-import tools.jackson.databind.ObjectMapper;
 
 import javax.net.ssl.SSLException;
 
@@ -81,7 +83,9 @@ public class MistralClient {
         }
         
         this.model = model;
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = new ObjectMapper()
+                .findAndRegisterModules()
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         
         log.info("MistralClient initialized with baseUrl: {}, model: {}", baseUrl, model);
     }
@@ -97,7 +101,7 @@ public class MistralClient {
                 model,
                 List.of(new Message("user", prompt)),
                 0.7,
-                true
+                false
         );
 
         try {
@@ -186,12 +190,15 @@ public class MistralClient {
     record ChatRequest(String model, List<Message> messages, double temperature, boolean stream) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record Message(String role, String content) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record ChatResponse(List<Choice> choices) {
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     record Choice(Message message) {
     }
 

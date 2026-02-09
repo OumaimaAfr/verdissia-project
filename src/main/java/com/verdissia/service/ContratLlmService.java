@@ -11,6 +11,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -119,7 +123,7 @@ public class ContratLlmService {
         
         try {
             // Parser la réponse de l'API externe
-            tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
+            ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
             ExternalApiResponse apiResponse = mapper.readValue(response, ExternalApiResponse.class);
             
             log.info("Réponse API externe - success: {}, reference: {}", 
@@ -163,16 +167,27 @@ public class ContratLlmService {
                     String jsonContent = message.substring(start, end).trim();
                     log.info("JSON extrait: {}", jsonContent);
 
-                    // Parser le contenu JSON de Mistral
-                    MistralResponseDTO mistralResponse = mapper.readValue(jsonContent, MistralResponseDTO.class);
+                    // Parser le contenu JSON de Mistral (tolérant au format de details)
+                    JsonNode mistralResponse = mapper.readTree(jsonContent);
+
+                    String details;
+                    JsonNode detailsNode = mistralResponse.path("details");
+                    if (detailsNode.isTextual()) {
+                        details = detailsNode.asText("");
+                    } else if (detailsNode.isMissingNode() || detailsNode.isNull()) {
+                        details = "";
+                    } else {
+                        details = detailsNode.toString();
+                    }
+                    details = details.replaceAll("\\s+", " ").trim();
 
                     return LlmAnalysisResult.builder()
-                            .decision(mistralResponse.getDecision())
-                            .motifCode(mistralResponse.getMotifCode())
-                            .motif(mistralResponse.getMotif())
-                            .actionConseiller(mistralResponse.getActionConseiller())
-                            .details(mistralResponse.getDetails())
-                            .confidence(mistralResponse.getConfidence())
+                            .decision(mistralResponse.path("decision").asText(null))
+                            .motifCode(mistralResponse.path("motifCode").asText(null))
+                            .motif(mistralResponse.path("motif").asText(""))
+                            .actionConseiller(mistralResponse.path("actionConseiller").asText(""))
+                            .details(details)
+                            .confidence(normalizeConfidence(mistralResponse.path("decision").asText(null), mistralResponse.path("confidence")))
                             .build();
                 }
             }
@@ -226,31 +241,37 @@ public class ContratLlmService {
     }
 
     // DTO pour la réponse de Mistral
-    private static class MistralResponseDTO {
-        private String decision;
-        private String motifCode;
-        private String motif;
-        private String actionConseiller;
-        private String details;
-        private java.math.BigDecimal confidence;
 
-        public String getDecision() { return decision; }
-        public void setDecision(String decision) { this.decision = decision; }
+    private BigDecimal normalizeConfidence(String decision, JsonNode confidenceNode) {
+        BigDecimal fallback;
+        if (decision != null && decision.equalsIgnoreCase("VALIDE")) {
+            fallback = new BigDecimal("0.95");
+        } else {
+            fallback = new BigDecimal("0.78");
+        }
 
-        public String getMotifCode() { return motifCode; }
-        public void setMotifCode(String motifCode) { this.motifCode = motifCode; }
+        BigDecimal confidence;
+        try {
+            if (confidenceNode == null || confidenceNode.isMissingNode() || confidenceNode.isNull()) {
+                confidence = fallback;
+            } else if (confidenceNode.isNumber()) {
+                confidence = confidenceNode.decimalValue();
+            } else if (confidenceNode.isTextual()) {
+                confidence = new BigDecimal(confidenceNode.asText().trim());
+            } else {
+                confidence = fallback;
+            }
+        } catch (Exception e) {
+            confidence = fallback;
+        }
 
-        public String getMotif() { return motif; }
-        public void setMotif(String motif) { this.motif = motif; }
-
-        public String getActionConseiller() { return actionConseiller; }
-        public void setActionConseiller(String actionConseiller) { this.actionConseiller = actionConseiller; }
-
-        public String getDetails() { return details; }
-        public void setDetails(String details) { this.details = details; }
-
-        public java.math.BigDecimal getConfidence() { return confidence; }
-        public void setConfidence(java.math.BigDecimal confidence) { this.confidence = confidence; }
+        if (confidence.compareTo(BigDecimal.ZERO) <= 0) {
+            confidence = fallback;
+        }
+        if (confidence.compareTo(BigDecimal.ONE) > 0) {
+            confidence = BigDecimal.ONE;
+        }
+        return confidence;
     }
 
     // Méthodes d'extraction du message

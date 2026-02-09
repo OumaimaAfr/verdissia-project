@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 
 @Entity
 @Table(name = "contrat")
@@ -73,6 +74,40 @@ public class Contrat {
     @Column(name = "date_mise_service")
     private LocalDateTime dateMiseEnService;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "date_service_status", length = 20)
+    private DateServiceStatus dateServiceStatus;
+
+    public DateServiceStatus getDateServiceStatus() {
+        if (this.dateServiceStatus != null) {
+            return this.dateServiceStatus;
+        }
+        return computeDateServiceStatus(this.dateSignature, this.dateMiseEnService);
+    }
+
+    @PrePersist
+    @PreUpdate
+    private void updateDateServiceStatus() {
+        this.dateServiceStatus = computeDateServiceStatus(this.dateSignature, this.dateMiseEnService);
+    }
+
+    private static DateServiceStatus computeDateServiceStatus(LocalDateTime dateSignature, LocalDateTime dateMiseEnService) {
+        if (dateSignature == null || dateMiseEnService == null) {
+            return DateServiceStatus.INCOHERENT;
+        }
+
+        if (dateMiseEnService.isBefore(dateSignature)) {
+            return DateServiceStatus.INCOHERENT;
+        }
+
+        long daysBetween = ChronoUnit.DAYS.between(dateSignature.toLocalDate(), dateMiseEnService.toLocalDate());
+        if (daysBetween >= 2) {
+            return DateServiceStatus.OK;
+        }
+
+        return DateServiceStatus.NON_STANDARD;
+    }
+
     @Column(name = "consentement_client", nullable = false)
     private Boolean consentementClient;
 
@@ -87,5 +122,11 @@ public class Contrat {
 
     public enum StatutLlm {
         PENDING, TRAITE
+    }
+
+    public enum DateServiceStatus {
+        OK,
+        NON_STANDARD,
+        INCOHERENT
     }
 }
