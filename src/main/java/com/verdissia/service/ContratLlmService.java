@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 @RequiredArgsConstructor
@@ -28,26 +29,39 @@ public class ContratLlmService {
     private final ExternalLlmService externalLlmService;
     private final LlmDecisionRepository llmDecisionRepository;
     private final PromptTemplate promptTemplate;
+    private final AtomicBoolean isProcessing = new AtomicBoolean(false);
 
-    @Scheduled(fixedRate = 30000) // Exécuter toutes les 30 secondes
+    @Scheduled(fixedRate = 15000) // Exécuter toutes les 15 secondes
     public void processPendingContrats() {
-        log.info("Recherche des contrats en attente d'analyse LLM...");
-        
-        List<Contrat> pendingContrats = contratRepository.findByStatutLlm(Contrat.StatutLlm.PENDING);
-        
-        if (pendingContrats.isEmpty()) {
-            log.info("Aucun contrat en attente d'analyse LLM");
+        // Éviter les traitements simultanés
+        if (!isProcessing.compareAndSet(false, true)) {
+            log.info("Un traitement est déjà en cours, skipping this execution");
             return;
         }
         
-        log.info("Trouvé {} contrat(s) en attente d'analyse LLM", pendingContrats.size());
-        
-        for (Contrat contrat : pendingContrats) {
-            try {
-                processContrat(contrat);
-            } catch (Exception e) {
-                log.error("Erreur lors du traitement du contrat {} : {}", contrat.getId(), e.getMessage(), e);
+        try {
+            log.info("Recherche des contrats en attente d'analyse LLM...");
+            
+            // Récupérer UN SEUL contrat pending à la fois
+            List<Contrat> pendingContrats = contratRepository.findByStatutLlm(Contrat.StatutLlm.PENDING);
+            
+            if (pendingContrats.isEmpty()) {
+                log.info("Aucun contrat en attente d'analyse LLM");
+                return;
             }
+            
+            // Traiter uniquement le premier contrat pending
+            Contrat contratToProcess = pendingContrats.get(0);
+            log.info("Traitement séquentiel du contrat {} - {} ({} contrat(s) en attente au total)", 
+                    contratToProcess.getId(), contratToProcess.getNumeroContrat(), pendingContrats.size());
+            
+            processContrat(contratToProcess);
+            log.info("Contrat {} traité avec succès", contratToProcess.getId());
+            
+        } catch (Exception e) {
+            log.error("Erreur lors du traitement des contrats : {}", e.getMessage(), e);
+        } finally {
+            isProcessing.set(false);
         }
     }
     

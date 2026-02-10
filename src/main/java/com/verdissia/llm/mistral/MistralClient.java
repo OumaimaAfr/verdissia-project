@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 @Slf4j
@@ -38,6 +39,9 @@ public class MistralClient {
     private final ObjectMapper objectMapper;
     private final boolean mockMode;
     private final Random random;
+    private final int maxRetries;
+    private final Duration initialBackoff;
+    private final Duration maxBackoff;
 
     public MistralClient(
             WebClient.Builder builder,
@@ -45,12 +49,18 @@ public class MistralClient {
             @Value("${llm.api-key}") String apiKey,
             @Value("${llm.model}") String model,
             @Value("${llm.timeout-seconds:20}") long timeoutSeconds,
-            @Value("${llm.mock-mode:false}") boolean mockMode
+            @Value("${llm.mock-mode:false}") boolean mockMode,
+            @Value("${llm.retry.max-attempts:3}") int maxRetries,
+            @Value("${llm.retry.initial-backoff-seconds:2}") long initialBackoffSeconds,
+            @Value("${llm.retry.max-backoff-seconds:30}") long maxBackoffSeconds
     ) {
         // Initialiser le timeout en premier
         this.timeout = Duration.ofSeconds(timeoutSeconds);
         this.mockMode = mockMode;
         this.random = new Random();
+        this.maxRetries = maxRetries;
+        this.initialBackoff = Duration.ofSeconds(initialBackoffSeconds);
+        this.maxBackoff = Duration.ofSeconds(maxBackoffSeconds);
         
         try {
             // Configuration pour ignorer la validation SSL (développement uniquement)
@@ -104,65 +114,10 @@ public class MistralClient {
                 false
         );
 
+        AtomicInteger retryCount = new AtomicInteger(0);
+        
         try {
-
-            ChatResponse response = webClient.post()
-                    .uri("/v1/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .accept(MediaType.APPLICATION_JSON)
-                    .bodyValue(body)
-                    .exchangeToMono(clientResponse -> {
-
-                        log.info("Mistral HTTP status: {}", clientResponse.statusCode());
-
-                        // ✅ Cas redirection (3xx)
-                        if (clientResponse.statusCode().is3xxRedirection()) {
-                            String location = clientResponse.headers().asHttpHeaders().getFirst("Location");
-                            log.error("Mistral API redirection to: {}", location);
-                            return Mono.error(
-                                    new RuntimeException(
-                                            "Mistral API redirection "
-                                                    + clientResponse.statusCode()
-                                                    + " to: " + location
-                                    )
-                            );
-                        }
-
-                        // ✅ Cas erreur HTTP (4xx / 5xx)
-                        if (clientResponse.statusCode().isError()) {
-                            return clientResponse.bodyToMono(String.class)
-                                    .defaultIfEmpty("<empty body>")
-                                    .flatMap(errorBody -> {
-                                        log.error("Mistral error body: {}", errorBody);
-                                        return Mono.error(
-                                                new RuntimeException(
-                                                        "Mistral API error "
-                                                                + clientResponse.statusCode()
-                                                                + " : " + errorBody
-                                                )
-                                        );
-                                    });
-                        }
-
-                        // ✅ Cas succès - lire d'abord en String pour validation
-                        return clientResponse.bodyToMono(String.class)
-                                .flatMap(rawBody -> {
-                                    log.info("Raw response from Mistral: {}", rawBody);
-                                    try {
-                                        // Essayer de parser en JSON
-                                        ChatResponse chatResponse = parseChatResponse(rawBody);
-                                        return Mono.just(chatResponse);
-                                    } catch (Exception e) {
-                                        log.error("Failed to parse response as JSON. Raw response: {}", rawBody);
-                                        return Mono.error(new RuntimeException(
-                                            "Mistral API returned non-JSON response (status: " + 
-                                            clientResponse.statusCode() + "): " + rawBody));
-                                    }
-                                });
-                    })
-                    .timeout(timeout)
-                    .block();
-
+            ChatResponse response = executeWithRetry(body, retryCount);
 
             log.info("Received response from Mistral: {}", response);
 
@@ -184,6 +139,122 @@ public class MistralClient {
         } catch (Exception e) {
             log.error("Exception during Mistral API call: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to call Mistral API: " + e.getMessage(), e);
+        }
+    }
+
+    private ChatResponse executeWithRetry(ChatRequest body, AtomicInteger retryCount) {
+        while (retryCount.get() <= maxRetries) {
+            try {
+                ChatResponse response = webClient.post()
+                        .uri("/v1/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .bodyValue(body)
+                        .exchangeToMono(clientResponse -> {
+
+                            log.info("Mistral HTTP status: {}", clientResponse.statusCode());
+
+                            // ✅ Cas redirection (3xx)
+                            if (clientResponse.statusCode().is3xxRedirection()) {
+                                String location = clientResponse.headers().asHttpHeaders().getFirst("Location");
+                                log.error("Mistral API redirection to: {}", location);
+                                return Mono.error(
+                                        new RuntimeException(
+                                                "Mistral API redirection "
+                                                        + clientResponse.statusCode()
+                                                        + " to: " + location
+                                        )
+                                );
+                            }
+
+                            // ✅ Cas erreur HTTP (4xx / 5xx)
+                            if (clientResponse.statusCode().isError()) {
+                                // Handle rate limiting (429) specially
+                                if (clientResponse.statusCode().value() == 429) {
+                                    return clientResponse.bodyToMono(String.class)
+                                            .defaultIfEmpty("<empty body>")
+                                            .flatMap(errorBody -> {
+                                                log.error("Mistral rate limit error body: {}", errorBody);
+                                                return Mono.error(new RateLimitException(
+                                                        "Mistral API rate limit exceeded: " + errorBody));
+                                            });
+                                }
+                                
+                                // For other errors, return immediately
+                                return clientResponse.bodyToMono(String.class)
+                                        .defaultIfEmpty("<empty body>")
+                                        .flatMap(errorBody -> {
+                                            log.error("Mistral error body: {}", errorBody);
+                                            return Mono.error(
+                                                    new RuntimeException(
+                                                            "Mistral API error "
+                                                                    + clientResponse.statusCode()
+                                                                    + " : " + errorBody
+                                                    )
+                                            );
+                                        });
+                            }
+
+                            // ✅ Cas succès - lire d'abord en String pour validation
+                            return clientResponse.bodyToMono(String.class)
+                                    .flatMap(rawBody -> {
+                                        log.info("Raw response from Mistral: {}", rawBody);
+                                        try {
+                                            // Essayer de parser en JSON
+                                            ChatResponse chatResponse = parseChatResponse(rawBody);
+                                            return Mono.just(chatResponse);
+                                        } catch (Exception e) {
+                                            log.error("Failed to parse response as JSON. Raw response: {}", rawBody);
+                                            return Mono.error(new RuntimeException(
+                                                "Mistral API returned non-JSON response (status: " + 
+                                                clientResponse.statusCode() + "): " + rawBody));
+                                        }
+                                    });
+                        })
+                        .timeout(timeout)
+                        .block();
+
+                return response;
+
+            } catch (RateLimitException e) {
+                int currentRetry = retryCount.getAndIncrement();
+                
+                if (currentRetry >= maxRetries) {
+                    log.error("Max retries ({}) exceeded for rate limit error", maxRetries);
+                    throw new RuntimeException("Rate limit exceeded after " + maxRetries + " retries: " + e.getMessage(), e);
+                }
+
+                Duration backoffTime = calculateBackoff(currentRetry);
+                log.warn("Rate limit hit, retry {} in {} seconds", currentRetry + 1, backoffTime.toSeconds());
+                
+                try {
+                    Thread.sleep(backoffTime.toMillis());
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during retry backoff", ie);
+                }
+            }
+        }
+        
+        throw new RuntimeException("Failed to complete request after " + maxRetries + " retries");
+    }
+
+    private Duration calculateBackoff(int retryAttempt) {
+        // Exponential backoff with jitter: initial * 2^attempt + random jitter
+        long exponentialBackoff = initialBackoff.toSeconds() * (1L << retryAttempt);
+        long jitter = random.nextInt(1000); // 0-1000ms jitter
+        
+        long totalBackoffMs = Math.min(
+            Math.max(exponentialBackoff * 1000 + jitter, initialBackoff.toMillis()),
+            maxBackoff.toMillis()
+        );
+        
+        return Duration.ofMillis(totalBackoffMs);
+    }
+
+    private static class RateLimitException extends RuntimeException {
+        public RateLimitException(String message) {
+            super(message);
         }
     }
 

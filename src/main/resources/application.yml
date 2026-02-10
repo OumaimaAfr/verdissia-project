@@ -17,3 +17,7 @@ llm:
   mock-mode: false
   threshold-auto-approve: 0.85
   threshold-auto-reject: 0.60
+  retry:
+    max-attempts: 3
+    initial-backoff-seconds: 2
+    max-backoff-seconds: 30
